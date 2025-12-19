@@ -1,5 +1,5 @@
 // src/map/CityMapScreen.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -10,14 +10,18 @@ import {
   Alert,
   Image,
 } from "react-native";
-import MapView, { Marker, Circle, Region } from "react-native-maps";
+import MapView, {
+  Marker,
+  Circle,
+  Region,
+  PROVIDER_GOOGLE,
+} from "react-native-maps";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
-
 import { useTheme } from "../theme/ThemeContext";
-import { RESTAURANTS } from "../data/restaurants";
-
-// navegación
+// ✅ 1. CAMBIO IMPORTANTE: Importar Contexto, NO data estática
+import { useRestaurants, Restaurant } from "../context/RestaurantsContext";
+import { useLocationState } from "../context/LocationContext";
 import {
   useNavigation,
   CompositeNavigationProp,
@@ -27,15 +31,10 @@ import { StackNavigationProp } from "@react-navigation/stack";
 import { RootTabParamList } from "../navigation/TabNavigator";
 import { RootStackParamList } from "../navigation/StackNavigator";
 
-// tipos de navegación
 type MapTabNav = BottomTabNavigationProp<RootTabParamList, "SearchTab">;
 type RootNav = StackNavigationProp<RootStackParamList>;
 type MapNavigationProp = CompositeNavigationProp<MapTabNav, RootNav>;
 
-// tipo de restaurante según tu arreglo
-type Restaurant = (typeof RESTAURANTS)[0];
-
-// Centro inicial (si no hay ubicación aún)
 const DEFAULT_CENTER = {
   latitude: 20.076186,
   longitude: -102.271682,
@@ -44,7 +43,7 @@ const DEFAULT_CENTER = {
 const USER_RADIUS_METERS = 2000;
 const INITIAL_DELTA = 0.05;
 
-// Estilos de mapa (por ahora solo apagamos POIs)
+// Estilos de mapa (Google Maps JSON styles)
 const lightMapStyle = [
   {
     featureType: "poi",
@@ -57,7 +56,20 @@ const lightMapStyle = [
     stylers: [{ visibility: "off" }],
   },
 ];
+
 const darkMapStyle = [
+  {
+    elementType: "geometry",
+    stylers: [{ color: "#242f3e" }],
+  },
+  {
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#242f3e" }],
+  },
+  {
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#746855" }],
+  },
   {
     featureType: "poi",
     elementType: "labels.icon",
@@ -70,13 +82,28 @@ const darkMapStyle = [
   },
 ];
 
-// Icono del restaurante
 const forkPin = require("../../assets/fork-pin.png");
+
+function buildNiceLabelFromGeocode(geo: Location.LocationGeocodedAddress[]) {
+  const first = geo?.[0];
+  if (!first) return "Ubicación actual";
+  const best = (
+    first.district ||
+    first.subregion ||
+    first.city ||
+    "tu zona"
+  ).toString();
+  return `Cerca de ${best}`;
+}
 
 const CityMapScreen: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
   const navigation = useNavigation<MapNavigationProp>();
+
+  // ✅ 2. USAR DATOS REALES DEL CONTEXTO
+  const { restaurants } = useRestaurants();
+  const { setLocation } = useLocationState();
 
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
@@ -91,16 +118,21 @@ const CityMapScreen: React.FC = () => {
   });
 
   const [loading, setLoading] = useState(false);
-
-  // restaurante seleccionado al tocar un pin
   const [selectedRestaurant, setSelectedRestaurant] =
     useState<Restaurant | null>(null);
+
+  // ✅ 3. FILTRAR RESTAURANTES CON UBICACIÓN VÁLIDA
+  const mapRestaurants = useMemo(() => {
+    return restaurants.filter(
+      (r) => r.latitude !== undefined && r.longitude !== undefined
+    );
+  }, [restaurants]);
 
   const askLocation = async () => {
     try {
       setLoading(true);
-      const { status } = await Location.requestForegroundPermissionsAsync();
 
+      const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permiso denegado", "Habilita ubicación para continuar.");
         return;
@@ -121,6 +153,14 @@ const CityMapScreen: React.FC = () => {
         latitude: current.latitude,
         longitude: current.longitude,
       }));
+
+      let label = "Ubicación actual";
+      try {
+        const geo = await Location.reverseGeocodeAsync(current);
+        label = buildNiceLabelFromGeocode(geo);
+      } catch {}
+
+      setLocation({ coords: current, label });
     } catch (e) {
       console.log(e);
       Alert.alert("Error", "No se pudo obtener tu ubicación.");
@@ -131,6 +171,7 @@ const CityMapScreen: React.FC = () => {
 
   useEffect(() => {
     askLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const circleCenter = userLocation ?? DEFAULT_CENTER;
@@ -144,7 +185,6 @@ const CityMapScreen: React.FC = () => {
         backgroundColor={theme.colors.header}
       />
 
-      {/* HEADER */}
       <View
         style={[
           styles.header,
@@ -164,18 +204,16 @@ const CityMapScreen: React.FC = () => {
         </Text>
       </View>
 
-      {/* MAPA */}
       <View style={styles.mapContainer}>
         <MapView
+          provider={PROVIDER_GOOGLE}
           style={StyleSheet.absoluteFill}
           region={region}
           onRegionChangeComplete={setRegion}
           customMapStyle={isDark ? darkMapStyle : lightMapStyle}
           showsPointsOfInterest={false}
-          // si tocas el mapa en blanco, se cierra la card
           onPress={() => setSelectedRestaurant(null)}
         >
-          {/* Círculo alrededor del usuario */}
           <Circle
             center={circleCenter}
             radius={USER_RADIUS_METERS}
@@ -183,13 +221,13 @@ const CityMapScreen: React.FC = () => {
             fillColor="rgba(255,140,0,0.15)"
           />
 
-          {/* Restaurantes (SOLO pin) */}
-          {RESTAURANTS.map((rest) => (
+          {/* ✅ 4. RENDERIZAR PINES REALES */}
+          {mapRestaurants.map((rest) => (
             <Marker
               key={rest.id}
               coordinate={{
-                latitude: rest.latitude,
-                longitude: rest.longitude,
+                latitude: rest.latitude!, // ! porque ya filtramos undefined
+                longitude: rest.longitude!,
               }}
               anchor={{ x: 0.5, y: 1 }}
               onPress={() => setSelectedRestaurant(rest)}
@@ -198,14 +236,13 @@ const CityMapScreen: React.FC = () => {
             </Marker>
           ))}
 
-          {/* Usuario */}
           {userLocation && (
             <Marker coordinate={userLocation} title="Tú" pinColor="#00B894" />
           )}
         </MapView>
       </View>
 
-      {/* BOTÓN UBICACIÓN + CARD DEL RESTAURANTE */}
+      {/* FOOTER / CARD FLOTANTE */}
       <View style={[styles.bottom, { backgroundColor: theme.colors.header }]}>
         {selectedRestaurant && (
           <View
@@ -221,8 +258,9 @@ const CityMapScreen: React.FC = () => {
                 { backgroundColor: theme.colors.card },
               ]}
               onPress={() =>
+                // ✅ 5. NAVEGACIÓN CORRECTA CON ID
                 navigation.navigate("CategoryDetail", {
-                  restaurantName: selectedRestaurant.name,
+                  restaurantId: selectedRestaurant.id,
                 })
               }
             >
@@ -290,20 +328,11 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
+  headerTitle: { fontSize: 16, fontWeight: "600" },
+  headerSubtitle: { fontSize: 12, marginTop: 2 },
   mapContainer: { flex: 1 },
 
-  bottom: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
+  bottom: { paddingHorizontal: 16, paddingVertical: 10 },
   button: {
     borderRadius: 999,
     paddingVertical: 10,
@@ -312,19 +341,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 8,
   },
-  buttonText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
+  buttonText: { fontSize: 13, fontWeight: "600" },
 
-  // PIN
-  restaurantMarkerImage: {
-    width: 34,
-    height: 34,
-    resizeMode: "contain",
-  },
+  restaurantMarkerImage: { width: 34, height: 34, resizeMode: "contain" },
 
-  // CARD flotante del restaurante
   previewContainer: {
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
@@ -338,11 +358,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  previewLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
+  previewLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   previewIconCircle: {
     width: 32,
     height: 32,
@@ -356,14 +372,8 @@ const styles = StyleSheet.create({
     tintColor: "#FFFFFF",
     resizeMode: "contain",
   },
-  previewName: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  previewCategory: {
-    fontSize: 12,
-    marginTop: 2,
-  },
+  previewName: { fontSize: 14, fontWeight: "700" },
+  previewCategory: { fontSize: 12, marginTop: 2 },
 });
 
 export default CityMapScreen;

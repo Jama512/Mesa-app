@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import HomeScreen from "../screens/home/HomeScreen";
 import FavoritesScreen from "../screens/Tabs/FavoritesScreen";
 import ProfileScreen from "../screens/Tabs/ProfileScreen";
-import CalendarScreen from "../screens/Tabs/CalendarScreen"; // 👈 NUEVO
+import CalendarScreen from "../screens/Tabs/CalendarScreen";
 import CityMapScreen from "../map/CityMapScreen";
 
 import { useTheme } from "../theme/ThemeContext";
@@ -15,9 +15,9 @@ import { useTheme } from "../theme/ThemeContext";
 export type RootTabParamList = {
   HomeTab: undefined;
   SearchTab: undefined;
-  CalendarTab: undefined; // 👈 NUEVO
+  CalendarTab: undefined; //
   FavoritesTab: undefined;
-  ProfileTab: undefined; // (lo vamos a mostrar como "Más")
+  ProfileTab: undefined; //
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -26,7 +26,6 @@ const TabNavigator: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
 
-  // 👇 En claro NO uses header si se ve oscuro; usa card.
   const tabBg = isDark ? theme.colors.header : theme.colors.card;
 
   return (
@@ -56,10 +55,10 @@ const TabNavigator: React.FC = () => {
 
           if (route.name === "HomeTab") iconName = "home-outline";
           if (route.name === "SearchTab") iconName = "map-outline";
-          if (route.name === "CalendarTab") iconName = "calendar-outline"; // 👈
+          if (route.name === "CalendarTab") iconName = "calendar-outline";
           if (route.name === "FavoritesTab") iconName = "heart-outline";
           if (route.name === "ProfileTab")
-            iconName = "ellipsis-horizontal-outline"; // 👈 "Más"
+            iconName = "ellipsis-horizontal-outline";
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },

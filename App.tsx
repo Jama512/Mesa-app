@@ -8,6 +8,11 @@ import {
 import StackNavigator from "./src/navigation/StackNavigator";
 import { ThemeProvider, useTheme } from "./src/theme/ThemeContext";
 import { AuthProvider } from "./src/screens/auth/AuthContext";
+import { LocationProvider } from "./src/context/LocationContext";
+import { RestaurantsProvider } from "./src/context/RestaurantsContext";
+import { RealmProvider } from "./src/database/realm";
+// ✅ IMPORTAR EL SEEDER
+import { RestaurantSeeder } from "./src/database/RestaurantSeeder";
 
 const AppNavigator: React.FC = () => {
   const { theme } = useTheme();
@@ -22,7 +27,6 @@ const AppNavigator: React.FC = () => {
       border: theme.colors.border,
     },
   };
-
   return (
     <NavigationContainer theme={navigationTheme}>
       <StackNavigator />
@@ -33,9 +37,18 @@ const AppNavigator: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <AppNavigator />
-      </AuthProvider>
+      <RealmProvider>
+        {/* ✅ AQUÍ SE EJECUTA LA CARGA INICIAL DE DATOS */}
+        <RestaurantSeeder />
+
+        <AuthProvider>
+          <LocationProvider>
+            <RestaurantsProvider>
+              <AppNavigator />
+            </RestaurantsProvider>
+          </LocationProvider>
+        </AuthProvider>
+      </RealmProvider>
     </ThemeProvider>
   );
 };

@@ -1,12 +1,11 @@
-// src/data/restaurants.ts
-import { Restaurant } from "../../types/restaurant.types";
+import { RestaurantBase } from "../../types/restaurant.types";
 
-export const RESTAURANTS: Restaurant[] = [
+export const RESTAURANTS: RestaurantBase[] = [
   {
     id: "1",
     name: "Pizzería Luka",
     category: "Pizza",
-    latitude: 20.0745, 
+    latitude: 20.0745,
     longitude: -102.274,
   },
   {

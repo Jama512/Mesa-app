@@ -1,23 +1,22 @@
-// src/database/models/Settings.ts
-import { Realm } from "@realm/react";
+// src/database/models/SettingsModel.ts
+import Realm from "realm";
 
 export class Settings extends Realm.Object<Settings> {
-  _id!: Realm.BSON.ObjectId;
-  theme!: string; // "light" | "dark"
+  _id!: string; // "app"
 
-  static generate(theme: "light" | "dark" = "light") {
-    return {
-      _id: new Realm.BSON.ObjectId(),
-      theme,
-    };
-  }
+  themeName!: "light" | "dark";
+
+  lastSyncAt?: Date; // para cuando conectes firebase/mongo/realm sync
+  offlineEnabled!: boolean;
 
   static schema: Realm.ObjectSchema = {
     name: "Settings",
     primaryKey: "_id",
     properties: {
-      _id: "objectId",
-      theme: "string",
+      _id: "string",
+      themeName: { type: "string", default: "light" },
+      lastSyncAt: "date?",
+      offlineEnabled: { type: "bool", default: true },
     },
   };
 }

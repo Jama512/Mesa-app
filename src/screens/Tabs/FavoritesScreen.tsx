@@ -11,73 +11,67 @@ import {
   ImageBackground,
   Image,
 } from "react-native";
-import { useTheme } from "../../theme/ThemeContext";
-import { FONT_SIZES } from "../../../types";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useTheme } from "../../theme/ThemeContext";
+import { useRestaurants } from "../../context/RestaurantsContext";
+import { useLocationState } from "../../context/LocationContext";
+import {
+  useNavigation,
+  CompositeNavigationProp,
+} from "@react-navigation/native";
+import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { StackNavigationProp } from "@react-navigation/stack";
+import { RootTabParamList } from "../../navigation/TabNavigator";
 import { RootStackParamList } from "../../navigation/StackNavigator";
-import { useAuth } from "../auth/AuthContext";
 
-type Nav = StackNavigationProp<RootStackParamList>;
-
-interface Favorite {
-  id: string;
-  name: string;
-  category: string;
-  location: string;
-  imageUri?: string;
-  isOwnerRestaurant?: boolean;
-}
+type TabNav = BottomTabNavigationProp<RootTabParamList, "FavoritesTab">;
+type StackNav = StackNavigationProp<RootStackParamList>;
+type Nav = CompositeNavigationProp<TabNav, StackNav>;
 
 const doodleBg = require("../../../assets/Background.png");
 
-const MOCK_FAVORITES: Favorite[] = [
-  {
-    id: "1",
-    name: "Pizzería Napoli",
-    category: "Pizzerías",
-    location: "Centro",
-  },
-  { id: "2", name: "La Postrería", category: "Postres", location: "Centro" },
-];
+// --- distancia real (km) ---
+const toRad = (v: number) => (v * Math.PI) / 180;
+const haversineKm = (
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+) => {
+  const R = 6371;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  return R * c;
+};
+
+const formatDistance = (km: number) => {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1)} km`;
+};
 
 const FavoritesScreen: React.FC = () => {
   const { theme } = useTheme();
-  const { state } = useAuth();
-  const navigation = useNavigation<Nav>();
   const isDark = theme.name === "dark";
+  const navigation = useNavigation<Nav>();
 
-  // ✅ Incluir "Tu restaurante" (si eres owner) sin duplicarlo
-  const favorites = useMemo(() => {
-    const list = [...MOCK_FAVORITES];
+  const { restaurants, favorites, toggleFavorite } = useRestaurants();
+  const { location } = useLocationState();
 
-    if (state.role === "owner" && state.restaurant?.name) {
-      const ownerName = state.restaurant.name.trim();
+  const favoriteRestaurants = useMemo(() => {
+    const set = new Set(favorites);
+    return restaurants.filter((r) => set.has(r.id));
+  }, [restaurants, favorites]);
 
-      const exists = list.some(
-        (f) => f.name.trim().toLowerCase() === ownerName.toLowerCase()
-      );
+  const hasFavorites = favoriteRestaurants.length > 0;
 
-      if (!exists) {
-        list.unshift({
-          id: "owner-fav",
-          name: ownerName,
-          category: "Tu restaurante",
-          location: state.restaurant.address?.split(",")?.[0]?.trim() || "—",
-          imageUri: state.restaurant.images?.[0],
-          isOwnerRestaurant: true,
-        });
-      }
-    }
-
-    return list;
-  }, [state.role, state.restaurant]);
-
-  const hasFavorites = favorites.length > 0;
-
-  const openRestaurant = (name: string) => {
-    navigation.navigate("CategoryDetail", { restaurantName: name });
+  const openRestaurant = (restaurantId: string) => {
+    navigation.navigate("CategoryDetail", { restaurantId });
   };
 
   return (
@@ -94,7 +88,6 @@ const FavoritesScreen: React.FC = () => {
           backgroundColor={theme.colors.header}
         />
 
-        {/* HEADER */}
         <View
           style={[
             styles.header,
@@ -117,123 +110,147 @@ const FavoritesScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* CONTENIDO */}
         {hasFavorites ? (
           <FlatList
-            data={favorites}
+            data={favoriteRestaurants}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => openRestaurant(item.name)}
-                style={[
-                  styles.card,
-                  {
-                    backgroundColor: theme.colors.card,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              >
-                <View style={styles.left}>
-                  {/* Miniatura */}
-                  {item.imageUri ? (
-                    <Image
-                      source={{ uri: item.imageUri }}
-                      style={styles.thumb}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.thumb,
-                        { backgroundColor: theme.colors.primary },
-                      ]}
-                    >
-                      <Ionicons name="restaurant" size={18} color="#fff" />
-                    </View>
-                  )}
+            renderItem={({ item }) => {
+              const imageUri = item.images?.[0];
 
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.titleRow}>
+              const canCalcDistance =
+                !!location.coords &&
+                typeof item.latitude === "number" &&
+                typeof item.longitude === "number";
+
+              const distanceLabel = canCalcDistance
+                ? formatDistance(
+                    haversineKm(location.coords!, {
+                      latitude: item.latitude!,
+                      longitude: item.longitude!,
+                    })
+                  )
+                : null;
+
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => openRestaurant(item.id)}
+                  style={[
+                    styles.card,
+                    {
+                      backgroundColor: theme.colors.card,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.left}>
+                    {imageUri ? (
+                      <Image source={{ uri: imageUri }} style={styles.thumb} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.thumb,
+                          { backgroundColor: theme.colors.primary },
+                        ]}
+                      >
+                        <Ionicons name="restaurant" size={18} color="#fff" />
+                      </View>
+                    )}
+
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.titleRow}>
+                        <Text
+                          style={[
+                            styles.itemName,
+                            { color: theme.colors.text },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+
+                        {item.isOwnerRestaurant ? (
+                          <View
+                            style={[
+                              styles.ownerPill,
+                              { borderColor: theme.colors.primary },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.ownerPillText,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              Tu restaurante
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
                       <Text
                         style={[
-                          styles.itemName,
-                          {
-                            color: theme.colors.text,
-                            fontSize: FONT_SIZES.medium,
-                          },
+                          styles.itemMeta,
+                          { color: theme.colors.textSecondary },
                         ]}
                         numberOfLines={1}
                       >
-                        {item.name}
+                        {item.category}
+                        {distanceLabel ? ` • ${distanceLabel}` : ""}
+                        {item.status ? ` • ${item.status}` : ""}
                       </Text>
-
-                      {item.isOwnerRestaurant && (
-                        <View
-                          style={[
-                            styles.ownerPill,
-                            { borderColor: theme.colors.primary },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.ownerPillText,
-                              { color: theme.colors.primary },
-                            ]}
-                          >
-                            Tu restaurante
-                          </Text>
-                        </View>
-                      )}
                     </View>
-
-                    <Text
-                      style={[
-                        styles.itemMeta,
-                        {
-                          color: theme.colors.textSecondary,
-                          fontSize: FONT_SIZES.small,
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.category} • {item.location}
-                    </Text>
                   </View>
-                </View>
 
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={theme.colors.textSecondary}
-                />
-              </TouchableOpacity>
-            )}
+                  {/* quitar de favoritos */}
+                  <TouchableOpacity
+                    onPress={() => toggleFavorite(item.id)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={styles.rightActions}
+                  >
+                    <Ionicons
+                      name="heart"
+                      size={18}
+                      color={theme.colors.primary}
+                    />
+                  </TouchableOpacity>
+
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={theme.colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              );
+            }}
           />
         ) : (
           <View style={styles.emptyContainer}>
             <Ionicons
               name="heart-outline"
-              size={28}
+              size={30}
               color={theme.colors.textSecondary}
             />
             <Text
-              style={[
-                styles.emptyText,
-                {
-                  color: theme.colors.textSecondary,
-                  fontSize: FONT_SIZES.small,
-                },
-              ]}
+              style={[styles.emptyText, { color: theme.colors.textSecondary }]}
             >
               Todavía no tienes restaurantes favoritos.
             </Text>
-
             <Text
               style={[styles.emptyHint, { color: theme.colors.textSecondary }]}
             >
               Desde un restaurante, toca el corazón para guardarlo aquí.
             </Text>
+
+            {/* ✅ mejor: ir al Tab Home */}
+            <TouchableOpacity
+              onPress={() => navigation.navigate("Home", { screen: "HomeTab" })}
+              style={[styles.cta, { backgroundColor: theme.colors.primary }]}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.ctaText}>Ir a Inicio</Text>
+            </TouchableOpacity>
           </View>
         )}
       </SafeAreaView>
@@ -250,14 +267,8 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomWidth: 1,
   },
-  headerTitle: {
-    fontWeight: "bold",
-    fontSize: 20,
-  },
-  headerSubtitle: {
-    marginTop: 4,
-    fontSize: 12,
-  },
+  headerTitle: { fontWeight: "bold", fontSize: 20 },
+  headerSubtitle: { marginTop: 4, fontSize: 12 },
 
   listContent: {
     paddingHorizontal: 16,
@@ -300,13 +311,15 @@ const styles = StyleSheet.create({
   },
 
   itemName: {
-    fontWeight: "700",
+    fontWeight: "800",
     maxWidth: 190,
+    fontSize: 15,
   },
 
   itemMeta: {
     marginTop: 2,
     opacity: 0.85,
+    fontSize: 12,
   },
 
   ownerPill: {
@@ -320,6 +333,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
+  rightActions: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    marginRight: 6,
+  },
+
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -327,15 +346,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     gap: 10,
   },
-  emptyText: {
-    textAlign: "center",
-    fontWeight: "600",
+  emptyText: { textAlign: "center", fontWeight: "700" },
+  emptyHint: { textAlign: "center", fontSize: 11, opacity: 0.85 },
+
+  cta: {
+    marginTop: 10,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
   },
-  emptyHint: {
-    textAlign: "center",
-    fontSize: 11,
-    opacity: 0.85,
-  },
+  ctaText: { color: "#fff", fontWeight: "800", fontSize: 13 },
 });
 
 export default FavoritesScreen;

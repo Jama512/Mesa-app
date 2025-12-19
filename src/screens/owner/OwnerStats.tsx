@@ -1,75 +1,529 @@
 // src/screens/owner/OwnerStats.tsx
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import React, { useMemo } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
 import OwnerLayout from "./OwnerLayout";
+import { useRestaurants } from "../../context/RestaurantsContext";
+import { useAuth } from "../auth/AuthContext";
+import { useNavigation } from "@react-navigation/native";
+import { StackNavigationProp } from "@react-navigation/stack";
+import { RootStackParamList } from "../../navigation/StackNavigator";
 
-const fakeVisits = [20, 30, 45, 60, 35, 28, 22];
+type Nav = StackNavigationProp<RootStackParamList, "OwnerStats">;
 
 const OwnerStats: React.FC = () => {
   const { theme } = useTheme();
+  const navigation = useNavigation<Nav>();
+  const { state } = useAuth();
+  const { restaurants, favorites, removeOwnerEvent } = useRestaurants();
+
+  const ownerRestaurant = useMemo(() => {
+    return restaurants.find((r) => r.isOwnerRestaurant) ?? null;
+  }, [restaurants]);
+
+  const stats = useMemo(() => {
+    const r = ownerRestaurant;
+
+    const name = r?.name ?? "Mi restaurante";
+    const rating = r?.rating ?? 4.8;
+    const status = r?.status ?? "Abierto ahora";
+
+    const events = r?.events ?? [];
+    const eventsCount = events.length;
+
+    // “Alcance” dummy por ahora (luego lo conectas a analytics / firestore)
+    const reach = 120 + eventsCount * 18;
+    const saves = favorites.length;
+
+    const profile = state.restaurant;
+    const totalFields = 6;
+
+    // ✅ CORRECCIÓN AQUÍ: Usamos (profile as any) para evitar el error de TypeScript
+    const filled =
+      (profile?.name ? 1 : 0) +
+      (profile?.address ? 1 : 0) +
+      (profile?.phone ? 1 : 0) +
+      (profile?.description ? 1 : 0) +
+      (typeof (profile as any)?.latitude === "number" ? 1 : 0) +
+      (profile?.features ? 1 : 0);
+
+    const profilePct = Math.round((filled / totalFields) * 100);
+
+    const latestEvents = [...events].slice(0, 3);
+
+    return {
+      name,
+      rating,
+      status,
+      eventsCount,
+      reach,
+      saves,
+      profilePct,
+      latestEvents,
+    };
+  }, [ownerRestaurant, favorites.length, state.restaurant]);
+
+  const goTo = (screen: keyof RootStackParamList, params?: any) => {
+    // @ts-ignore
+    navigation.navigate(screen, params);
+  };
+
+  const confirmDeleteEvent = (eventId: string) => {
+    Alert.alert(
+      "Eliminar anuncio",
+      "¿Seguro que quieres eliminar este anuncio? Ya no aparecerá en el calendario.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: () => removeOwnerEvent(eventId),
+        },
+      ]
+    );
+  };
 
   return (
     <OwnerLayout
       title="Estadísticas"
-      subtitle="Visitas de ejemplo (últimos 7 días)."
+      subtitle="Resumen rápido del rendimiento de tu restaurante."
       showBack
     >
-      <View style={styles.chartContainer}>
-        <Text style={[styles.chartTitle, { color: theme.colors.text }]}>
-          Visitas por día (dummy)
-        </Text>
+      {/* HERO */}
+      <View
+        style={[
+          styles.hero,
+          {
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.border,
+          },
+        ]}
+      >
+        <View style={styles.heroTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.heroTitle, { color: theme.colors.text }]}>
+              {stats.name}
+            </Text>
 
-        <View style={styles.barRow}>
-          {fakeVisits.map((v, idx) => (
-            <View key={idx} style={styles.barItem}>
-              <View
+            <View style={styles.heroMetaRow}>
+              <Ionicons name="star" size={14} color={theme.colors.primary} />
+              <Text
+                style={[styles.heroMeta, { color: theme.colors.textSecondary }]}
+              >
+                {stats.rating.toFixed(1)} • {stats.status}
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.badge,
+              {
+                backgroundColor: theme.colors.background,
+                borderColor: theme.colors.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name="analytics-outline"
+              size={16}
+              color={theme.colors.primary}
+            />
+            <Text style={[styles.badgeText, { color: theme.colors.text }]}>
+              {stats.profilePct}% perfil
+            </Text>
+          </View>
+        </View>
+
+        {/* KPI GRID */}
+        <View style={styles.kpiRow}>
+          <KpiCard
+            theme={theme}
+            icon="megaphone-outline"
+            value={String(stats.eventsCount)}
+            label="Anuncios"
+          />
+          <KpiCard
+            theme={theme}
+            icon="bookmark-outline"
+            value={String(stats.saves)}
+            label="Guardados"
+          />
+          <KpiCard
+            theme={theme}
+            icon="eye-outline"
+            value={String(stats.reach)}
+            label="Alcance"
+          />
+        </View>
+
+        <Text style={[styles.note, { color: theme.colors.textSecondary }]}>
+          * “Alcance” es estimado por ahora. Luego lo conectas a
+          Firebase/Analytics.
+        </Text>
+      </View>
+
+      {/* ÚLTIMOS ANUNCIOS */}
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+          Últimos anuncios
+        </Text>
+        <TouchableOpacity
+          onPress={() => goTo("OwnerCreateAnnouncement")}
+          activeOpacity={0.9}
+          style={[styles.sectionBtn, { backgroundColor: theme.colors.primary }]}
+        >
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={styles.sectionBtnText}>Nuevo</Text>
+        </TouchableOpacity>
+      </View>
+
+      {stats.latestEvents.length > 0 ? (
+        <View style={{ gap: 10 }}>
+          {stats.latestEvents.map((e) => (
+            <View
+              key={e.id}
+              style={[
+                styles.eventCard,
+                {
+                  backgroundColor: theme.colors.card,
+                  borderColor: theme.colors.border,
+                },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.eventTitle, { color: theme.colors.text }]}>
+                  {e.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.eventSubtitle,
+                    { color: theme.colors.textSecondary },
+                  ]}
+                >
+                  {e.dateLabel}
+                </Text>
+                {!!e.description && (
+                  <Text
+                    style={[
+                      styles.eventDesc,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {e.description}
+                  </Text>
+                )}
+              </View>
+
+              <TouchableOpacity
+                onPress={() => confirmDeleteEvent(e.id)}
                 style={[
-                  styles.bar,
+                  styles.trashBtn,
                   {
-                    height: 10 + v,
-                    backgroundColor: theme.colors.primary,
+                    backgroundColor: theme.colors.background,
+                    borderColor: theme.colors.border,
                   },
                 ]}
-              />
-              <Text
-                style={[styles.barLabel, { color: theme.colors.textSecondary }]}
+                activeOpacity={0.9}
               >
-                {"LMXJVSD"[idx]}
-              </Text>
+                <Ionicons
+                  name="trash-outline"
+                  size={18}
+                  color={theme.colors.textSecondary}
+                />
+              </TouchableOpacity>
             </View>
           ))}
         </View>
+      ) : (
+        <View
+          style={[
+            styles.empty,
+            {
+              backgroundColor: theme.colors.card,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <Ionicons
+            name="megaphone-outline"
+            size={22}
+            color={theme.colors.textSecondary}
+          />
+          <Text
+            style={[styles.emptyText, { color: theme.colors.textSecondary }]}
+          >
+            Aún no has publicado anuncios.
+          </Text>
+          <TouchableOpacity
+            style={[styles.emptyCta, { backgroundColor: theme.colors.primary }]}
+            onPress={() => goTo("OwnerCreateAnnouncement")}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.emptyCtaText}>Publicar el primero</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ACCIONES RÁPIDAS */}
+      <View style={[styles.sectionHeader, { marginTop: 18 }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+          Acciones rápidas
+        </Text>
+      </View>
+
+      <View style={styles.actionsGrid}>
+        <ActionCard
+          theme={theme}
+          icon="person-outline"
+          title="Editar perfil"
+          subtitle="Datos y servicios"
+          onPress={() => goTo("OwnerProfile")}
+        />
+        <ActionCard
+          theme={theme}
+          icon="restaurant-outline"
+          title="Menú"
+          subtitle="Platillos y precios"
+          onPress={() => goTo("OwnerMenuList")}
+        />
+        <ActionCard
+          theme={theme}
+          icon="calendar-outline"
+          title="Calendario"
+          subtitle="Ver anuncios"
+          onPress={() => goTo("OwnerDashboard")}
+        />
       </View>
     </OwnerLayout>
   );
 };
 
+function KpiCard({
+  theme,
+  icon,
+  value,
+  label,
+}: {
+  theme: any;
+  icon: any;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View
+      style={[
+        styles.kpiCard,
+        {
+          backgroundColor: theme.colors.background,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.kpiIcon,
+          {
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.border,
+          },
+        ]}
+      >
+        <Ionicons name={icon} size={16} color={theme.colors.primary} />
+      </View>
+      <Text style={[styles.kpiValue, { color: theme.colors.text }]}>
+        {value}
+      </Text>
+      <Text style={[styles.kpiLabel, { color: theme.colors.textSecondary }]}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function ActionCard({
+  theme,
+  icon,
+  title,
+  subtitle,
+  onPress,
+}: {
+  theme: any;
+  icon: any;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.9}
+      style={[
+        styles.actionCard,
+        {
+          backgroundColor: theme.colors.card,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.actionIcon,
+          {
+            backgroundColor: theme.colors.background,
+            borderColor: theme.colors.border,
+          },
+        ]}
+      >
+        <Ionicons name={icon} size={18} color={theme.colors.primary} />
+      </View>
+      <Text style={[styles.actionTitle, { color: theme.colors.text }]}>
+        {title}
+      </Text>
+      <Text
+        style={[styles.actionSubtitle, { color: theme.colors.textSecondary }]}
+        numberOfLines={1}
+      >
+        {subtitle}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  chartContainer: {
-    marginTop: 16,
+  hero: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    marginBottom: 14,
   },
-  chartTitle: {
-    fontSize: 13,
-    marginBottom: 12,
-  },
-  barRow: {
+  heroTop: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  barItem: {
     alignItems: "center",
+    gap: 10,
+  },
+  heroTitle: { fontSize: 16, fontWeight: "900" },
+  heroMetaRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  heroMeta: { fontSize: 12, fontWeight: "700", opacity: 0.9 },
+  badge: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  badgeText: { fontSize: 12, fontWeight: "900" },
+
+  kpiRow: { marginTop: 12, flexDirection: "row", gap: 10 },
+  kpiCard: {
     flex: 1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
-  bar: {
-    width: 20,
-    borderRadius: 6,
+  kpiIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  barLabel: {
+  kpiValue: { fontSize: 16, fontWeight: "900" },
+  kpiLabel: { fontSize: 11, fontWeight: "800", opacity: 0.9 },
+
+  note: { marginTop: 10, fontSize: 11, fontWeight: "600", opacity: 0.9 },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  sectionTitle: { fontSize: 14, fontWeight: "900" },
+  sectionBtn: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  sectionBtnText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+
+  eventCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  eventTitle: { fontSize: 13, fontWeight: "900" },
+  eventSubtitle: {
+    marginTop: 2,
     fontSize: 11,
-    marginTop: 4,
+    fontWeight: "700",
+    opacity: 0.9,
   },
+  eventDesc: { marginTop: 6, fontSize: 11, fontWeight: "600", opacity: 0.9 },
+  trashBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  empty: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    alignItems: "center",
+    gap: 10,
+  },
+  emptyText: { fontSize: 12, fontWeight: "800", textAlign: "center" },
+  emptyCta: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
+  emptyCtaText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 14,
+  },
+  actionCard: {
+    width: "48%",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  actionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  actionTitle: { fontSize: 13, fontWeight: "900", marginBottom: 3 },
+  actionSubtitle: { fontSize: 11, fontWeight: "700", opacity: 0.9 },
 });
 
 export default OwnerStats;

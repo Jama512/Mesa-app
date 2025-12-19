@@ -8,13 +8,13 @@ import WelcomeScreen from "../screens/auth/WelcomeScreen";
 import LoginScreen from "../screens/auth/LoginScreen";
 import SignUpScreen from "../screens/auth/SignUpScreen";
 
-// Tabs usuario invitado / cliente
+// Tabs
 import TabNavigator, { RootTabParamList } from "./TabNavigator";
 
-// Detalle de restaurante (cliente)
+// Guest detail
 import CategoryDetailScreen from "../screens/home/CategoryDetailScreen";
 
-// Flujo de dueño
+// Owner flow
 import OwnerDashboard from "../screens/owner/OwnerDashboard";
 import OwnerCreateAnnouncement from "../screens/owner/OwnerCreateAnnouncement";
 import OwnerMenuList from "../screens/owner/OwnerMenuList";
@@ -26,25 +26,29 @@ import OwnerLocationPicker from "../screens/owner/OwnerLocationPicker";
 // Auth global
 import { useAuth } from "../screens/auth/AuthContext";
 
+export type Dish = {
+  id: string;
+  name: string;
+  price: number;
+  description?: string;
+  isAvailable: boolean;
+};
+
 export type RootStackParamList = {
-  // Auth/Guest
+  // Guest/auth stack
   Welcome: undefined;
   Login: undefined;
   SignUp: undefined;
-
-  // Tabs para invitado / usuario normal
   Home: NavigatorScreenParams<RootTabParamList>;
+  CategoryDetail: { restaurantId: string };
 
-  // Detalle de restaurante
-  CategoryDetail: { restaurantName: string };
-
-  // Owner
+  // Owner stack
   OwnerDashboard: undefined;
   OwnerCreateAnnouncement: undefined;
   OwnerMenuList: undefined;
   OwnerStats: undefined;
   OwnerProfile: undefined;
-  OwnerAddDish: undefined;
+  OwnerAddDish: { mode?: "create" | "edit"; dish?: Dish } | undefined;
   OwnerLocationPicker: undefined;
 };
 
@@ -52,47 +56,48 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 const StackNavigator: React.FC = () => {
   const { state } = useAuth();
-
   const isOwner = state.isAuthenticated && state.role === "owner";
 
-  // ✅ IMPORTANTE: Al cambiar isOwner, cambiamos el "key" para forzar remount del stack
-  if (isOwner) {
-    return (
-      <Stack.Navigator
-        key="owner-stack"
-        initialRouteName="OwnerDashboard"
-        screenOptions={{ headerShown: false }}
-      >
-        <Stack.Screen name="OwnerDashboard" component={OwnerDashboard} />
-        <Stack.Screen
-          name="OwnerCreateAnnouncement"
-          component={OwnerCreateAnnouncement}
-        />
-        <Stack.Screen name="OwnerMenuList" component={OwnerMenuList} />
-        <Stack.Screen name="OwnerStats" component={OwnerStats} />
-        <Stack.Screen name="OwnerProfile" component={OwnerProfile} />
-        <Stack.Screen
-          name="OwnerLocationPicker"
-          component={OwnerLocationPicker}
-        />
-        <Stack.Screen name="OwnerAddDish" component={OwnerAddDish} />
-      </Stack.Navigator>
-    );
-  }
-
-  // Guest / Auth flow
   return (
     <Stack.Navigator
-      key="guest-stack"
-      initialRouteName="Welcome"
+      key={isOwner ? "owner-stack" : "guest-stack"}
       screenOptions={{ headerShown: false }}
     >
-      <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="SignUp" component={SignUpScreen} />
+      {isOwner ? (
+        <>
+          <Stack.Screen name="OwnerDashboard" component={OwnerDashboard} />
+          <Stack.Screen
+            name="OwnerCreateAnnouncement"
+            component={OwnerCreateAnnouncement}
+          />
+          <Stack.Screen name="OwnerMenuList" component={OwnerMenuList} />
+          <Stack.Screen name="OwnerAddDish" component={OwnerAddDish} />
+          <Stack.Screen name="OwnerStats" component={OwnerStats} />
+          <Stack.Screen name="OwnerProfile" component={OwnerProfile} />
+          <Stack.Screen
+            name="OwnerLocationPicker"
+            component={OwnerLocationPicker}
+          />
 
-      <Stack.Screen name="Home" component={TabNavigator} />
-      <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+          {/* ✅ IMPORTANTE: también disponible para owner (para CalendarTab, etc.) */}
+          <Stack.Screen name="Home" component={TabNavigator} />
+          <Stack.Screen
+            name="CategoryDetail"
+            component={CategoryDetailScreen}
+          />
+        </>
+      ) : (
+        <>
+          <Stack.Screen name="Welcome" component={WelcomeScreen} />
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="SignUp" component={SignUpScreen} />
+          <Stack.Screen name="Home" component={TabNavigator} />
+          <Stack.Screen
+            name="CategoryDetail"
+            component={CategoryDetailScreen}
+          />
+        </>
+      )}
     </Stack.Navigator>
   );
 };

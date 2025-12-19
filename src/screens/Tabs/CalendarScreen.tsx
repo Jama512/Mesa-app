@@ -8,47 +8,92 @@ import {
   ImageBackground,
   TouchableOpacity,
   FlatList,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
+import { useRestaurants } from "../../context/RestaurantsContext";
+import {
+  useNavigation,
+  CompositeNavigationProp,
+} from "@react-navigation/native";
+import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import { StackNavigationProp } from "@react-navigation/stack";
+import { RootTabParamList } from "../../navigation/TabNavigator";
+import { RootStackParamList } from "../../navigation/StackNavigator";
+
+import { useQuery, useRealm } from "../../database/realm";
+import { Event } from "../../database/models/EventModel";
+
+type TabNav = BottomTabNavigationProp<RootTabParamList, "CalendarTab">;
+type StackNav = StackNavigationProp<RootStackParamList>;
+type Nav = CompositeNavigationProp<TabNav, StackNav>;
 
 const doodleBg = require("../../../assets/Background.png");
 
 type CalendarItem = {
   id: string;
+  restaurantId: string;
   title: string;
-  subtitle: string; // restaurante / info
-  dateLabel: string; // "Hoy 9:00 PM"
+  subtitle: string;
+  dateLabel: string;
+  description?: string;
 };
-
-const MOCK_ITEMS: CalendarItem[] = [
-  {
-    id: "1",
-    title: "Noche de Karaoke",
-    subtitle: "Bar Central",
-    dateLabel: "Hoy · 9:00 PM",
-  },
-  {
-    id: "2",
-    title: "2x1 Cerveza",
-    subtitle: "El Draft",
-    dateLabel: "Hoy · 8:00 PM",
-  },
-];
 
 const CalendarScreen: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
+  const navigation = useNavigation<Nav>();
+  const realm = useRealm();
+
+  const { restaurants } = useRestaurants();
+  const events = useQuery(Event);
 
   const [selectedDay, setSelectedDay] = useState<"Hoy" | "Semana" | "Mes">(
     "Hoy"
   );
 
-  const items = useMemo(() => {
-    // Después aquí filtras por fecha real (Realm)
-    return MOCK_ITEMS;
-  }, []);
+  const items: CalendarItem[] = useMemo(() => {
+    // por ahora el filtro Hoy/Semana/Mes es visual (dateLabel es texto)
+    const list = Array.from(events).map((e) => {
+      const rid = e.restaurantId;
+      const r = restaurants.find((x) => x.id === rid);
+      return {
+        id: e._id.toHexString(),
+        restaurantId: rid,
+        title: e.title,
+        subtitle: r?.name ?? "Restaurante",
+        dateLabel: e.dateLabel,
+        description: e.description,
+      };
+    });
+
+    // recientes arriba
+    return list.reverse();
+  }, [events, restaurants, selectedDay]);
+
+  const openRestaurant = (restaurantId: string) => {
+    navigation.navigate("CategoryDetail", { restaurantId });
+  };
+
+  const removeEvent = (idHex: string) => {
+    Alert.alert("Eliminar anuncio", "¿Deseas eliminar este anuncio?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: () => {
+          try {
+            const objId = new (require("realm").BSON.ObjectId)(idHex);
+            const ev = realm.objectForPrimaryKey(Event, objId);
+            if (!ev) return;
+            realm.write(() => realm.delete(ev));
+          } catch {}
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView
@@ -78,7 +123,6 @@ const CalendarScreen: React.FC = () => {
             Calendario
           </Text>
 
-          {/* Segmented control simple */}
           <View
             style={[
               styles.segment,
@@ -136,9 +180,8 @@ const CalendarScreen: React.FC = () => {
                     borderColor: theme.colors.border,
                   },
                 ]}
-                onPress={() => {
-                  // luego: navegar a CategoryDetail o detalle de evento
-                }}
+                onPress={() => openRestaurant(item.restaurantId)}
+                onLongPress={() => removeEvent(item.id)}
               >
                 <View style={styles.cardLeft}>
                   <View
@@ -170,6 +213,18 @@ const CalendarScreen: React.FC = () => {
                     >
                       {item.subtitle}
                     </Text>
+
+                    {!!item.description && (
+                      <Text
+                        style={[
+                          styles.cardDesc,
+                          { color: theme.colors.textSecondary },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {item.description}
+                      </Text>
+                    )}
                   </View>
                 </View>
 
@@ -201,7 +256,12 @@ const CalendarScreen: React.FC = () => {
             <Text
               style={[styles.emptyText, { color: theme.colors.textSecondary }]}
             >
-              No tienes eventos guardados todavía.
+              Aún no hay promociones publicadas.
+            </Text>
+            <Text
+              style={[styles.emptyHint, { color: theme.colors.textSecondary }]}
+            >
+              Cuando un restaurante publique un evento, aparecerá aquí.
             </Text>
           </View>
         )}
@@ -220,11 +280,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
+  headerTitle: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
 
   segment: {
     flexDirection: "row",
@@ -238,16 +294,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     alignItems: "center",
   },
-  segmentText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  segmentText: { fontSize: 12, fontWeight: "700" },
 
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 24,
-  },
+  listContent: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 },
   card: {
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
@@ -272,22 +321,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  cardSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  cardRight: {
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  dateLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
+  cardTitle: { fontSize: 14, fontWeight: "800" },
+  cardSubtitle: { fontSize: 12, marginTop: 2 },
+  cardDesc: { marginTop: 6, fontSize: 11, opacity: 0.9 },
+
+  cardRight: { alignItems: "flex-end", gap: 6 },
+  dateLabel: { fontSize: 11, fontWeight: "600" },
 
   empty: {
     flex: 1,
@@ -296,11 +335,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 10,
   },
-  emptyText: {
-    textAlign: "center",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  emptyText: { textAlign: "center", fontSize: 12, fontWeight: "700" },
+  emptyHint: { textAlign: "center", fontSize: 11, opacity: 0.85 },
 });
 
 export default CalendarScreen;

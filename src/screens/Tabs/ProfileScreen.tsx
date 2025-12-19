@@ -8,384 +8,209 @@ import {
   StatusBar,
   Switch,
   TouchableOpacity,
-  ImageBackground,
-  Image,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
 import { useAuth } from "../../screens/auth/AuthContext";
 
 import { useNavigation } from "@react-navigation/native";
+import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { StackNavigationProp } from "@react-navigation/stack";
+import { CompositeNavigationProp } from "@react-navigation/native";
+
+import { RootTabParamList } from "../../navigation/TabNavigator";
 import { RootStackParamList } from "../../navigation/StackNavigator";
 
-type ProfileNav = StackNavigationProp<RootStackParamList>;
-
-const doodleBg = require("../../../assets/Background.png");
-const logoMesa = require("../../../assets/LogoMesa.png");
+type TabNav = BottomTabNavigationProp<RootTabParamList, "ProfileTab">;
+type StackNav = StackNavigationProp<RootStackParamList>;
+type Nav = CompositeNavigationProp<TabNav, StackNav>;
 
 const ProfileScreen: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme.name === "dark";
 
   const { state, logout } = useAuth();
-  const navigation = useNavigation<ProfileNav>();
+  const navigation = useNavigation<Nav>();
 
   const isOwner = state.role === "owner";
-  const ownerEmail = state.email ?? "Usuario";
+  const ownerEmail = state.email ?? "Usuario invitado";
 
   const handleOwnerButton = () => {
     if (isOwner) {
+      // ✅ Importante: NO reset a "Welcome"
+      // Tu StackNavigator se remonta solo por el key guest/owner
       logout();
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Welcome" }],
-      });
-    } else {
-      navigation.navigate("Login");
+      return;
     }
-  };
 
-  const goToOwnerDashboard = () => {
-    navigation.navigate("OwnerDashboard");
+    // ✅ Ir a login de dueños (Stack)
+    navigation.navigate("Login");
   };
 
   return (
-    <ImageBackground
-      source={doodleBg}
-      style={{ flex: 1 }}
-      imageStyle={{ opacity: isDark ? 0.08 : 0.14 }}
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <SafeAreaView
-        style={[styles.container, { backgroundColor: "transparent" }]}
-      >
-        <StatusBar
-          barStyle={isDark ? "light-content" : "dark-content"}
-          backgroundColor={theme.colors.header}
-        />
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={theme.colors.background}
+      />
 
-        {/* HEADER (coherente con Home/Favorites) */}
+      {/* CARD MESA + Apariencia */}
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: isDark ? "#111111" : "#FFFFFF" },
+        ]}
+      >
+        <Text style={[styles.logoText, { color: theme.colors.primary }]}>
+          MESA
+        </Text>
+
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+          Apariencia
+        </Text>
+
         <View
           style={[
-            styles.header,
-            {
-              backgroundColor: theme.colors.header,
-              borderBottomColor: theme.colors.border,
-            },
+            styles.toggleRow,
+            { backgroundColor: isDark ? "#1E1E1E" : "#222222" },
           ]}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Image source={logoMesa} style={styles.logo} resizeMode="contain" />
-            <View>
-              <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-                Perfil
-              </Text>
-              <Text
-                style={[
-                  styles.headerSubtitle,
-                  { color: theme.colors.textSecondary },
-                ]}
-              >
-                Ajustes de la app y sesión
-              </Text>
-            </View>
-          </View>
-
-          <Ionicons
-            name="settings-outline"
-            size={20}
-            color={theme.colors.textSecondary}
+          <Text style={[styles.toggleLabel, { color: "#FFFFFF" }]}>
+            Modo oscuro
+          </Text>
+          <Switch
+            value={isDark}
+            onValueChange={toggleTheme}
+            thumbColor={isDark ? "#FFA726" : "#F5F5F5"}
+            trackColor={{ false: "#888888", true: "#FFA726" }}
           />
         </View>
+      </View>
 
-        {/* CARD: Apariencia */}
-        <View
+      {/* LEGAL Y SOPORTE */}
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: isDark ? "#111111" : "#FFFFFF" },
+        ]}
+      >
+        <Text
           style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.card,
-              borderColor: theme.colors.border,
-            },
+            styles.subSectionTitle,
+            { color: theme.colors.textSecondary },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            Apariencia
-          </Text>
+          LEGAL Y SOPORTE
+        </Text>
 
-          <View
-            style={[
-              styles.rowItem,
-              {
-                backgroundColor: theme.colors.background,
-                borderColor: theme.colors.border,
-              },
-            ]}
-          >
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-            >
-              <Ionicons
-                name={isDark ? "moon-outline" : "sunny-outline"}
-                size={18}
-                color={theme.colors.textSecondary}
-              />
-              <Text style={[styles.rowLabel, { color: theme.colors.text }]}>
-                Modo oscuro
-              </Text>
-            </View>
-
-            <Switch
-              value={isDark}
-              onValueChange={toggleTheme}
-              thumbColor={isDark ? theme.colors.primary : "#F5F5F5"}
-              trackColor={{
-                false: "rgba(0,0,0,0.25)",
-                true: theme.colors.primary,
-              }}
-            />
-          </View>
-        </View>
-
-        {/* CARD: Legal / soporte */}
-        <View
+        <TouchableOpacity
           style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.card,
-              borderColor: theme.colors.border,
-            },
+            styles.listItem,
+            { backgroundColor: isDark ? "#1E1E1E" : "#F3F3F3" },
           ]}
+          activeOpacity={0.85}
         >
-          <Text
-            style={[
-              styles.subSectionTitle,
-              { color: theme.colors.textSecondary },
-            ]}
-          >
-            LEGAL Y SOPORTE
+          <Text style={[styles.listItemText, { color: theme.colors.text }]}>
+            Términos y Condiciones
           </Text>
-
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[
-              styles.listItem,
-              {
-                backgroundColor: theme.colors.background,
-                borderColor: theme.colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.listItemText, { color: theme.colors.text }]}>
-              Términos y Condiciones
-            </Text>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={theme.colors.textSecondary}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[
-              styles.listItem,
-              {
-                backgroundColor: theme.colors.background,
-                borderColor: theme.colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.listItemText, { color: theme.colors.text }]}>
-              Política de privacidad
-            </Text>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={theme.colors.textSecondary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {/* CTA Dueño */}
-        <View style={styles.footer}>
-          <Text style={[styles.footerLabel, { color: theme.colors.text }]}>
-            ¿Eres dueño de un restaurante?
+          <Text style={[styles.chevron, { color: theme.colors.textSecondary }]}>
+            &gt;
           </Text>
+        </TouchableOpacity>
 
-          {isOwner && (
-            <TouchableOpacity
-              style={[
-                styles.secondaryButton,
-                { borderColor: theme.colors.primary },
-              ]}
-              onPress={goToOwnerDashboard}
-              activeOpacity={0.9}
-            >
-              <Ionicons
-                name="speedometer-outline"
-                size={16}
-                color={theme.colors.primary}
-                style={{ marginRight: 6 }}
-              />
-              <Text
-                style={[
-                  styles.secondaryButtonText,
-                  { color: theme.colors.primary },
-                ]}
-              >
-                Ir a mi panel (Owner)
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            style={[
-              styles.ownerButton,
-              { backgroundColor: theme.colors.primary },
-            ]}
-            onPress={handleOwnerButton}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.ownerButtonText}>
-              {isOwner ? "Cerrar sesión" : "Inicia sesión como dueño"}
-            </Text>
-          </TouchableOpacity>
-
-          <Text
-            style={[
-              styles.footerCaption,
-              { color: theme.colors.textSecondary },
-            ]}
-          >
-            {isOwner
-              ? `Sesión iniciada como: ${ownerEmail}`
-              : "Estás navegando como invitado."}
+        <TouchableOpacity
+          style={[
+            styles.listItem,
+            { backgroundColor: isDark ? "#1E1E1E" : "#F3F3F3" },
+          ]}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.listItemText, { color: theme.colors.text }]}>
+            Política de privacidad
           </Text>
-        </View>
-      </SafeAreaView>
-    </ImageBackground>
+          <Text style={[styles.chevron, { color: theme.colors.textSecondary }]}>
+            &gt;
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* CTA DUEÑO / SESIÓN */}
+      <View style={styles.footer}>
+        <Text style={[styles.footerLabel, { color: theme.colors.text }]}>
+          ¿Eres dueño?
+        </Text>
+
+        <TouchableOpacity
+          style={[
+            styles.ownerButton,
+            { backgroundColor: theme.colors.primary },
+          ]}
+          onPress={handleOwnerButton}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.ownerButtonText}>
+            {isOwner ? "Cerrar sesión" : "Inicia sesión como dueño"}
+          </Text>
+        </TouchableOpacity>
+
+        <Text
+          style={[styles.footerCaption, { color: theme.colors.textSecondary }]}
+        >
+          {isOwner
+            ? `Sesión iniciada como: ${ownerEmail}`
+            : "Estás navegando como invitado."}
+        </Text>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  logo: {
-    width: 44,
-    height: 28,
-  },
-  headerTitle: {
-    fontWeight: "bold",
-    fontSize: 18,
-  },
-  headerSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-  },
-
   card: {
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 18,
     padding: 16,
-    borderWidth: 1,
   },
-
-  sectionTitle: {
-    fontSize: 14,
+  logoText: {
+    fontSize: 18,
     fontWeight: "700",
+    textAlign: "center",
     marginBottom: 10,
+    letterSpacing: 2,
   },
-
-  rowItem: {
-    borderRadius: 14,
+  sectionTitle: { fontSize: 14, fontWeight: "600", marginBottom: 10 },
+  toggleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
-  rowLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  subSectionTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    marginBottom: 8,
-    letterSpacing: 0.5,
-  },
-
+  toggleLabel: { fontSize: 14, fontWeight: "500" },
+  subSectionTitle: { fontSize: 11, fontWeight: "600", marginBottom: 8 },
   listItem: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginTop: 8,
-    borderWidth: 1,
   },
-  listItemText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  footer: {
-    marginTop: 18,
-    alignItems: "center",
-    paddingHorizontal: 24,
-    paddingBottom: 18,
-  },
-  footerLabel: {
-    fontSize: 13,
-    marginBottom: 10,
-    fontWeight: "600",
-  },
-
-  secondaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  secondaryButtonText: {
-    fontWeight: "800",
-    fontSize: 12,
-  },
-
+  listItemText: { flex: 1, fontSize: 14, fontWeight: "500" },
+  chevron: { fontSize: 18, fontWeight: "600" },
+  footer: { marginTop: 24, alignItems: "center", paddingHorizontal: 24 },
+  footerLabel: { fontSize: 13, marginBottom: 8 },
   ownerButton: {
     paddingHorizontal: 24,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: 999,
-    width: "100%",
-    alignItems: "center",
   },
-  ownerButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  footerCaption: {
-    fontSize: 11,
-    marginTop: 8,
-    textAlign: "center",
-    opacity: 0.9,
-  },
+  ownerButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+  footerCaption: { fontSize: 11, marginTop: 6, textAlign: "center" },
 });
 
 export default ProfileScreen;

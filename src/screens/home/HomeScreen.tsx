@@ -24,7 +24,9 @@ import { RootStackParamList } from "../../navigation/StackNavigator";
 import { RootTabParamList } from "../../navigation/TabNavigator";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { useAuth } from "../auth/AuthContext";
+
+import { useLocationState } from "../../context/LocationContext";
+import { useRestaurants } from "../../context/RestaurantsContext";
 
 type HomeTabNav = BottomTabNavigationProp<RootTabParamList, "HomeTab">;
 type RootNav = StackNavigationProp<RootStackParamList>;
@@ -32,19 +34,33 @@ type HomeScreenNavigationProp = CompositeNavigationProp<HomeTabNav, RootNav>;
 
 const doodleBg = require("../../../assets/Background.png");
 
-// ✅ Cuando tengas imágenes en assets, descomenta:
-const RESTAURANT_IMAGES: Record<string, any> = {
-  // "1": require("../../../assets/restaurants/luka.jpg"),
-  // "2": require("../../../assets/restaurants/coffee-black.jpg"),
-  // "3": require("../../../assets/restaurants/buen-taco.jpg"),
+// ---------- Distancia (Haversine) ----------
+const toRad = (v: number) => (v * Math.PI) / 180;
+
+const haversineMeters = (
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+) => {
+  const R = 6371000; // m
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+
+  const s =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  return R * c;
 };
 
-const EVENT_IMAGES: Record<string, any> = {
-  // "1": require("../../../assets/events/karaoke.jpg"),
-  // "2": require("../../../assets/events/beer.jpg"),
-  // "3": require("../../../assets/events/game.jpg"),
+const formatDistance = (meters: number) => {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
 };
 
+// Mock de eventos/categorías (luego lo conectas a EventsContext o Realm)
 const mockEvents = [
   {
     id: "1",
@@ -77,100 +93,91 @@ const mockCategories = [
 type RestaurantCardItem = {
   id: string;
   name: string;
-  distance: string;
-  rating: number;
   category: string;
+  rating: number;
   status: string;
 
-  // ✅ lo que suba el owner (Realm) normalmente será URI
+  latitude?: number;
+  longitude?: number;
+
+  distanceMeters?: number | null;
+  distanceLabel: string;
+
   imageUri?: string;
-
-  // ✅ mientras, assets locales
-  imageSource?: any;
-
   isOwnerRestaurant?: boolean;
 };
 
-const mockRestaurants: RestaurantCardItem[] = [
-  {
-    id: "1",
-    name: "Pizzería Luka",
-    distance: "450 m",
-    rating: 4.8,
-    category: "Pizza",
-    status: "Abierto ahora",
-    imageSource: RESTAURANT_IMAGES["1"],
-  },
-  {
-    id: "2",
-    name: "Coffee Black",
-    distance: "650 m",
-    rating: 4.6,
-    category: "Café",
-    status: "Cierra a las 10:00 PM",
-    imageSource: RESTAURANT_IMAGES["2"],
-  },
-  {
-    id: "3",
-    name: "El Buen Taco",
-    distance: "900 m",
-    rating: 4.7,
-    category: "Tacos",
-    status: "Abierto ahora",
-    imageSource: RESTAURANT_IMAGES["3"],
-  },
-];
-
 const HomeScreen: React.FC = () => {
   const { theme } = useTheme();
-  const { state } = useAuth();
   const isDark = theme.name === "dark";
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
+  const { location } = useLocationState();
+  const { restaurants } = useRestaurants();
+
   const [query, setQuery] = useState("");
 
-  // ✅ Inserta el restaurante del owner arriba (si está logueado como owner)
-  const restaurants: RestaurantCardItem[] = useMemo(() => {
-    const list = [...mockRestaurants];
+  const searchBg = isDark ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.78)";
+  const searchBorder = isDark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.06)";
 
-    if (state.role === "owner" && state.restaurant?.name) {
-      const ownerName = state.restaurant.name.trim();
+  // 1) convertir a items + calcular distancia
+  const computedRestaurants: RestaurantCardItem[] = useMemo(() => {
+    const userCoords = location.coords;
 
-      const ownerItem: RestaurantCardItem = {
-        id: "owner-restaurant",
-        name: ownerName,
-        distance: "—",
-        rating: 5.0,
-        category: "Tu restaurante",
-        status:
-          ownerName === "Restaurante no configurado"
-            ? "Configúralo en Mi perfil"
-            : "Administrando",
-        isOwnerRestaurant: true,
-        imageUri: state.restaurant.images?.[0], // ✅ primera foto
+    const base: RestaurantCardItem[] = restaurants.map((r: any) => {
+      const hasCoords =
+        userCoords &&
+        typeof r.latitude === "number" &&
+        typeof r.longitude === "number";
+
+      const distanceMeters = hasCoords
+        ? haversineMeters(userCoords!, {
+            latitude: r.latitude,
+            longitude: r.longitude,
+          })
+        : null;
+
+      return {
+        id: r.id,
+        name: r.name,
+        category: r.category ?? "Restaurante",
+        rating: typeof r.rating === "number" ? r.rating : 4.7,
+        status: r.isOwnerRestaurant ? "Administrando" : "Abierto ahora",
+        latitude: r.latitude,
+        longitude: r.longitude,
+        distanceMeters,
+        distanceLabel:
+          distanceMeters != null ? formatDistance(distanceMeters) : "—",
+        imageUri: r.images?.[0],
+        isOwnerRestaurant: !!r.isOwnerRestaurant,
       };
+    });
 
-      const exists = list.some(
-        (r) => r.name.trim().toLowerCase() === ownerName.toLowerCase()
-      );
+    // 2) ordenar por distancia si ya hay coords (manteniendo owner arriba si existe)
+    if (location.coords) {
+      const head = base[0]?.isOwnerRestaurant ? [base[0]] : [];
+      const rest = base[0]?.isOwnerRestaurant ? base.slice(1) : base;
 
-      return exists ? list : [ownerItem, ...list];
+      rest.sort((a, b) => {
+        const da = a.distanceMeters ?? Number.POSITIVE_INFINITY;
+        const db = b.distanceMeters ?? Number.POSITIVE_INFINITY;
+        return da - db;
+      });
+
+      return [...head, ...rest];
     }
 
-    return list;
-  }, [state.role, state.restaurant]);
+    return base;
+  }, [restaurants, location.coords]);
 
+  // 3) filtro por búsqueda
   const filteredRestaurants = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return restaurants;
-    return restaurants.filter((r) =>
+    if (!q) return computedRestaurants;
+    return computedRestaurants.filter((r) =>
       `${r.name} ${r.category}`.toLowerCase().includes(q)
     );
-  }, [query, restaurants]);
-
-  // ✅ Buscador con buen contraste en claro/oscuro
-  const searchBg = isDark ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.72)";
-  const searchBorder = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)";
+  }, [query, computedRestaurants]);
 
   return (
     <ImageBackground
@@ -179,14 +186,13 @@ const HomeScreen: React.FC = () => {
       imageStyle={{ opacity: isDark ? 0.1 : 0.18 }}
     >
       <SafeAreaView style={styles.container}>
-        {/* ✅ evita “mancha” arriba en tema claro */}
         <StatusBar
           translucent
           backgroundColor="transparent"
           barStyle={isDark ? "light-content" : "dark-content"}
         />
 
-        {/* HEADER (solo ubicación, sin campana) */}
+        {/* HEADER (solo ubicación, sin notificaciones) */}
         <View style={styles.header}>
           <View style={styles.locationRow}>
             <Ionicons
@@ -194,8 +200,11 @@ const HomeScreen: React.FC = () => {
               size={16}
               color={theme.colors.primary}
             />
-            <Text style={[styles.locationText, { color: theme.colors.text }]}>
-              Ubicación actual: Cerca de Zona Centro
+            <Text
+              style={[styles.locationText, { color: theme.colors.text }]}
+              numberOfLines={1}
+            >
+              Ubicación actual: {location.label}
             </Text>
           </View>
         </View>
@@ -250,49 +259,35 @@ const HomeScreen: React.FC = () => {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingRight: 16 }}
             >
-              {mockEvents.map((event) => {
-                const img = EVENT_IMAGES[event.id];
-                return (
-                  <TouchableOpacity
-                    key={event.id}
-                    style={[
-                      styles.eventCard,
-                      { backgroundColor: theme.colors.card },
-                    ]}
-                    activeOpacity={0.85}
+              {mockEvents.map((event) => (
+                <TouchableOpacity
+                  key={event.id}
+                  style={[
+                    styles.eventCard,
+                    { backgroundColor: theme.colors.card },
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.eventBadge}>
+                    <Text style={styles.eventBadgeText}>{event.badge}</Text>
+                  </View>
+                  <Text
+                    style={[styles.eventTitle, { color: theme.colors.text }]}
+                    numberOfLines={2}
                   >
-                    {img ? (
-                      <ImageBackground
-                        source={img}
-                        style={styles.eventImg}
-                        imageStyle={{ borderRadius: 16, opacity: 0.92 }}
-                      >
-                        <View style={styles.eventOverlay} />
-                      </ImageBackground>
-                    ) : null}
-
-                    <View style={styles.eventBadge}>
-                      <Text style={styles.eventBadgeText}>{event.badge}</Text>
-                    </View>
-
-                    <Text
-                      style={[styles.eventTitle, { color: theme.colors.text }]}
-                      numberOfLines={2}
-                    >
-                      {event.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.eventSubtitle,
-                        { color: theme.colors.textSecondary },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {event.subtitle}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                    {event.title}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.eventSubtitle,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {event.subtitle}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
 
@@ -360,20 +355,14 @@ const HomeScreen: React.FC = () => {
                 activeOpacity={0.9}
                 onPress={() =>
                   navigation.navigate("CategoryDetail", {
-                    restaurantName: rest.name,
-                  })
+                    restaurantId: rest.id,
+                  } as any)
                 }
               >
                 <View style={styles.restaurantLeft}>
-                  {/* ✅ Imagen (uri / asset) */}
                   {rest.imageUri ? (
                     <Image
                       source={{ uri: rest.imageUri }}
-                      style={styles.photoAvatar}
-                    />
-                  ) : rest.imageSource ? (
-                    <Image
-                      source={rest.imageSource}
                       style={styles.photoAvatar}
                     />
                   ) : (
@@ -388,13 +377,7 @@ const HomeScreen: React.FC = () => {
                   )}
 
                   <View style={{ flex: 1 }}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
+                    <View style={styles.titleRow}>
                       <Text
                         style={[
                           styles.restaurantName,
@@ -431,8 +414,7 @@ const HomeScreen: React.FC = () => {
                       ]}
                       numberOfLines={1}
                     >
-                      {rest.category}
-                      {rest.distance !== "—" ? ` · ${rest.distance}` : ""}
+                      {rest.category} · {rest.distanceLabel}
                     </Text>
 
                     <Text
@@ -481,7 +463,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  locationText: { fontSize: 13, fontWeight: "600" },
+  locationText: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
 
   scroll: { flex: 1, paddingHorizontal: 16, paddingTop: 10 },
 
@@ -499,18 +481,12 @@ const styles = StyleSheet.create({
   section: { marginTop: 4, marginBottom: 16 },
   sectionTitle: { fontWeight: "600", marginBottom: 10 },
 
-  // Eventos
   eventCard: {
     width: 220,
     borderRadius: 16,
     padding: 14,
     marginRight: 12,
     overflow: "hidden",
-  },
-  eventImg: { ...StyleSheet.absoluteFillObject },
-  eventOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.25)",
   },
   eventBadge: {
     alignSelf: "flex-start",
@@ -524,7 +500,6 @@ const styles = StyleSheet.create({
   eventTitle: { fontSize: 16, fontWeight: "600", marginBottom: 4 },
   eventSubtitle: { fontSize: 12 },
 
-  // Categorías
   categoryChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -543,7 +518,6 @@ const styles = StyleSheet.create({
   },
   categoryText: { fontSize: 13, fontWeight: "500" },
 
-  // Restaurantes
   restaurantCard: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -567,7 +541,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   photoAvatar: { width: 44, height: 44, borderRadius: 12 },
-  restaurantName: { fontSize: 15, fontWeight: "600" },
+
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  restaurantName: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
+
   ownerPill: {
     borderWidth: 1,
     paddingHorizontal: 8,
@@ -575,8 +552,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   ownerPillText: { fontSize: 10, fontWeight: "700" },
+
   restaurantMeta: { fontSize: 12 },
   restaurantStatus: { fontSize: 11, marginTop: 2 },
+
   restaurantRight: {
     alignItems: "flex-end",
     justifyContent: "space-between",

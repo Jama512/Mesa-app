@@ -160,7 +160,6 @@ const styles = StyleSheet.create({
   headerWrap: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingBottom: 10,
-    // pequeño “elevation” para Android, sombra suave iOS
     ...Platform.select({
       android: { elevation: 2 },
       ios: {

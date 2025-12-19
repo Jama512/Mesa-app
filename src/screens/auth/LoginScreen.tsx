@@ -17,8 +17,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
-import { StackNavigationProp } from "@react-navigation/stack";
 import { useNavigation } from "@react-navigation/native";
+import { StackNavigationProp } from "@react-navigation/stack";
 import { RootStackParamList } from "../../navigation/StackNavigator";
 import { useAuth } from "./AuthContext";
 
@@ -29,7 +29,7 @@ interface LoginErrors {
   password?: string;
 }
 
-// ✅ Tus assets (nombres reales)
+// ✅ Assets
 const BG = require("../../../assets/Background.png");
 const LOGO = require("../../../assets/LogoMesa.png");
 
@@ -46,11 +46,7 @@ const LoginScreen: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
 
   const ORANGE = theme.colors.primary ?? "#FF7A00";
-
-  const bgOpacity = useMemo(() => {
-    // ✅ background visible incluso en dark
-    return isDark ? 0.1 : 0.14;
-  }, [isDark]);
+  const bgOpacity = useMemo(() => (isDark ? 0.1 : 0.14), [isDark]);
 
   const validate = () => {
     const newErrors: LoginErrors = {};
@@ -69,25 +65,18 @@ const LoginScreen: React.FC = () => {
     if (!validate()) return;
     setIsSubmitting(true);
 
-    // ⚠️ luego aquí conectas Realm
     setTimeout(() => {
+      // ✅ SOLO setea el rol/estado. NO hacemos reset/navigate a OwnerDashboard.
+      // El StackNavigator debe cambiar solo al stack de owner cuando isOwner=true.
       loginAsOwner({ email, restaurantName: "Restaurante no configurado" });
 
-      // ✅ manda al flujo de dueño
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "OwnerDashboard" }],
-      });
-
       setIsSubmitting(false);
-    }, 700);
+    }, 500);
   };
 
   const goToSignUp = () => navigation.navigate("SignUp");
 
   const goBack = () => {
-    // Si vienes del Welcome, esto te regresa.
-    // Si no hay back stack, manda a Welcome.
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.navigate("Welcome");
   };
@@ -101,7 +90,6 @@ const LoginScreen: React.FC = () => {
         style={styles.bg}
         imageStyle={{ opacity: bgOpacity }}
       >
-        {/* Overlay para que se lea bien en cualquier modo */}
         <View
           pointerEvents="none"
           style={[
@@ -121,7 +109,7 @@ const LoginScreen: React.FC = () => {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* Top bar (back) */}
+            {/* Top bar */}
             <View style={styles.topBar}>
               <TouchableOpacity onPress={goBack} style={styles.backBtn}>
                 <Ionicons name="chevron-back" size={22} color="#fff" />
@@ -129,17 +117,15 @@ const LoginScreen: React.FC = () => {
               <View style={{ width: 38 }} />
             </View>
 
-            {/* CARD */}
+            {/* Card */}
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.headerSmall}>Inicio de sesión</Text>
                 <Text style={styles.headerSmall}>Dueños</Text>
-
                 <Image source={LOGO} style={styles.logo} resizeMode="contain" />
               </View>
 
               <View style={styles.form}>
-                {/* Email */}
                 <TextInput
                   placeholder="Email"
                   placeholderTextColor="#9CA3AF"
@@ -157,7 +143,6 @@ const LoginScreen: React.FC = () => {
                   <Text style={styles.errorText}>{errors.email}</Text>
                 )}
 
-                {/* Password */}
                 <View style={styles.passwordWrapper}>
                   <TextInput
                     placeholder="Contraseña"
@@ -213,7 +198,7 @@ const LoginScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Footer CTA */}
+            {/* Footer */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>¿Aún no estás en MESA?</Text>
               <TouchableOpacity onPress={goToSignUp} activeOpacity={0.8}>
@@ -233,9 +218,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   safeArea: { flex: 1 },
   bg: { flex: 1 },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  overlay: { ...StyleSheet.absoluteFillObject },
   root: {
     flexGrow: 1,
     paddingHorizontal: 22,
@@ -266,21 +249,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
   },
-  cardHeader: {
-    alignItems: "center",
-    marginBottom: 18,
-  },
+  cardHeader: { alignItems: "center", marginBottom: 18 },
   headerSmall: {
     color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "600",
     lineHeight: 18,
   },
-  logo: {
-    width: 150,
-    height: 70,
-    marginTop: 14,
-  },
+  logo: { width: 150, height: 70, marginTop: 14 },
 
   form: { marginTop: 6 },
   input: {
@@ -308,11 +284,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     marginTop: -6,
   },
-  forgotButton: {
-    alignSelf: "flex-start",
-    marginTop: 4,
-    marginBottom: 16,
-  },
+  forgotButton: { alignSelf: "flex-start", marginTop: 4, marginBottom: 16 },
   forgotText: { color: "#D1D5DB", fontSize: 12 },
 
   primaryButton: {
@@ -321,11 +293,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
+  primaryButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
 
   footer: { alignItems: "center", paddingTop: 10 },
   footerText: { color: "#FFFFFF", fontSize: 12, marginBottom: 4 },

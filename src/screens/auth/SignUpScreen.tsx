@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
@@ -30,12 +31,15 @@ interface SignUpErrors {
 const SignUpScreen: React.FC = () => {
   const { theme } = useTheme();
   const navigation = useNavigation<SignUpNav>();
+
+  // ✅ Usamos el hook de Auth (que ahora guarda en AsyncStorage)
   const { loginAsOwner } = useAuth();
 
   const [ownerName, setOwnerName] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [errors, setErrors] = useState<SignUpErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -63,18 +67,27 @@ const SignUpScreen: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSignUp = () => {
+  const handleSignUp = async () => {
     if (!validate()) return;
+
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      // Aquí registrarías en tu BD
-      loginAsOwner({ email, restaurantName });
+    try {
+      // ✅ Simulamos una pequeña espera para UX (opcional)
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
-      navigation.replace("Home", { screen: "HomeTab" });
+      // ✅ Login Persistente:
+      // Esto guarda la sesión en AsyncStorage y actualiza el estado global.
+      // Al actualizarse el estado, el StackNavigator cambiará automáticamente
+      // al stack de "Owner" (Dashboard), por lo que NO necesitamos navigation.navigate.
+      await loginAsOwner({ email, restaurantName });
 
+      // No es necesario setIsSubmitting(false) porque el componente se desmontará.
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Ocurrió un problema al registrar la cuenta.");
       setIsSubmitting(false);
-    }, 800);
+    }
   };
 
   const goToLogin = () => {

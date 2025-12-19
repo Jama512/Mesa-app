@@ -1,5 +1,5 @@
 // src/screens/Tabs/SearchScreen.tsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,132 +9,116 @@ import {
   TextInput,
   FlatList,
   TouchableOpacity,
+  Image,
 } from "react-native";
 import { useTheme } from "../../theme/ThemeContext";
-import { FONT_SIZES } from "../../../types";
+import { useRestaurants } from "../../context/RestaurantsContext"; // ✅ Usar contexto
+import { useNavigation } from "@react-navigation/native";
+import { StackNavigationProp } from "@react-navigation/stack";
+import { RootStackParamList } from "../../navigation/StackNavigator";
 
-interface Restaurant {
-  id: string;
-  name: string;
-  category: string;
-  location: string;
-}
-
-const MOCK_RESTAURANTS: Restaurant[] = [
-  {
-    id: "1",
-    name: "Pizzería Napoli",
-    category: "Pizzerías",
-    location: "Centro",
-  },
-  { id: "2", name: "Taco Loco", category: "Mexicana", location: "Norte" },
-  { id: "3", name: "Sushi Go", category: "Asiática", location: "Sur" },
-  { id: "4", name: "La Postrería", category: "Postres", location: "Centro" },
-];
+type SearchNav = StackNavigationProp<RootStackParamList>;
 
 const SearchScreen: React.FC = () => {
   const { theme } = useTheme();
-  const isDark = theme.name === "dark";
+  const navigation = useNavigation<SearchNav>();
+
+  // ✅ Traemos los datos reales
+  const { restaurants } = useRestaurants();
 
   const [query, setQuery] = useState("");
 
-  const filtered = MOCK_RESTAURANTS.filter(
-    (item) =>
-      item.name.toLowerCase().includes(query.toLowerCase()) ||
-      item.category.toLowerCase().includes(query.toLowerCase()) ||
-      item.location.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
+    return restaurants.filter((item) => {
+      const matchName = item.name.toLowerCase().includes(q);
+      const matchCat = item.category.toLowerCase().includes(q);
+      return matchName || matchCat;
+    });
+  }, [query, restaurants]);
 
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
       <StatusBar
-        barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor={theme.colors.header}
+        barStyle={theme.name === "dark" ? "light-content" : "dark-content"}
       />
 
-      {/* HEADER */}
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: theme.colors.header,
-            borderBottomColor: theme.colors.border,
-          },
-        ]}
-      >
+      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
         <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-          Buscar
+          Explorar
         </Text>
       </View>
 
-      {/* BUSCADOR */}
       <View style={styles.searchContainer}>
         <TextInput
           style={[
             styles.input,
             {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.card,
               color: theme.colors.text,
+              borderColor: theme.colors.border,
             },
           ]}
-          placeholder="Buscar por nombre, categoría, ubicación..."
+          placeholder="Buscar restaurante o categoría..."
           placeholderTextColor={theme.colors.textSecondary}
           value={query}
           onChangeText={setQuery}
         />
       </View>
 
-      {/* LISTA */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[
-              styles.item,
-              {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-              },
-            ]}
+            style={[styles.item, { backgroundColor: theme.colors.card }]}
+            onPress={() =>
+              navigation.navigate("CategoryDetail", { restaurantId: item.id })
+            }
           >
-            <Text
-              style={[
-                styles.itemName,
-                { color: theme.colors.text, fontSize: FONT_SIZES.medium },
-              ]}
-            >
-              {item.name}
-            </Text>
-            <Text
-              style={[
-                styles.itemMeta,
-                {
-                  color: theme.colors.textSecondary,
-                  fontSize: FONT_SIZES.small,
-                },
-              ]}
-            >
-              {item.category} • {item.location}
-            </Text>
+            <View style={styles.row}>
+              {/* Si tienes imágenes, muestra la primera, si no un icono placeholder */}
+              <View
+                style={[styles.thumb, { backgroundColor: theme.colors.border }]}
+              >
+                {item.images && item.images.length > 0 ? (
+                  <Image
+                    source={{ uri: item.images[0] }}
+                    style={{ width: 40, height: 40 }}
+                  />
+                ) : (
+                  <Text style={{ fontSize: 18 }}>🍽️</Text>
+                )}
+              </View>
+              <View>
+                <Text style={[styles.itemName, { color: theme.colors.text }]}>
+                  {item.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.itemCat,
+                    { color: theme.colors.textSecondary },
+                  ]}
+                >
+                  {item.category} • {item.address || "Ver mapa"}
+                </Text>
+              </View>
+            </View>
           </TouchableOpacity>
         )}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text
-              style={[
-                styles.emptyText,
-                {
-                  color: theme.colors.textSecondary,
-                  fontSize: FONT_SIZES.small,
-                },
-              ]}
+              style={[styles.emptyText, { color: theme.colors.textSecondary }]}
             >
-              No se encontraron resultados.
+              {query.length > 0
+                ? "No se encontraron resultados."
+                : "Escribe para buscar..."}
             </Text>
           </View>
         }
@@ -144,53 +128,40 @@ const SearchScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     paddingHorizontal: 20,
     paddingVertical: 18,
     borderBottomWidth: 1,
   },
-  headerTitle: {
-    fontWeight: "bold",
-    fontSize: 20,
-  },
-  searchContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
+  headerTitle: { fontWeight: "bold", fontSize: 20 },
+  searchContainer: { paddingHorizontal: 20, paddingVertical: 12 },
   input: {
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     fontSize: 14,
   },
-  listContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
+  listContent: { paddingHorizontal: 20, paddingBottom: 20 },
   item: {
     borderRadius: 12,
-    borderWidth: 1,
     padding: 12,
     marginBottom: 10,
   },
-  itemName: {
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  itemMeta: {
-    opacity: 0.8,
-  },
-  emptyContainer: {
-    paddingTop: 40,
+  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  thumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
-  emptyText: {
-    fontStyle: "italic",
-  },
+  itemName: { fontWeight: "700", fontSize: 15 },
+  itemCat: { fontSize: 12, marginTop: 2 },
+  emptyContainer: { marginTop: 40, alignItems: "center" },
+  emptyText: { fontSize: 14 },
 });
 
 export default SearchScreen;
