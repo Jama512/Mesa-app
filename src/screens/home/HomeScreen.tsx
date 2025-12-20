@@ -60,28 +60,7 @@ const formatDistance = (meters: number) => {
   return `${(meters / 1000).toFixed(1)} km`;
 };
 
-// Mock de eventos/categorías (luego lo conectas a EventsContext o Realm)
-const mockEvents = [
-  {
-    id: "1",
-    title: "Noche de Karaoke",
-    subtitle: "Hoy 9:00 PM · Bar Central",
-    badge: "Solo hoy",
-  },
-  {
-    id: "2",
-    title: "2x1 Cerveza",
-    subtitle: "Hasta las 11:00 PM · El Draft",
-    badge: "Promo",
-  },
-  {
-    id: "3",
-    title: "Partido en Pantalla Grande",
-    subtitle: "7:00 PM · La Cantera",
-    badge: "Deportes",
-  },
-];
-
+// Categorías fijas (Estándar para MVP)
 const mockCategories = [
   { id: "1", name: "Pizza", icon: "pizza" as const },
   { id: "2", name: "Tacos", icon: "restaurant" as const },
@@ -96,13 +75,10 @@ type RestaurantCardItem = {
   category: string;
   rating: number;
   status: string;
-
   latitude?: number;
   longitude?: number;
-
   distanceMeters?: number | null;
   distanceLabel: string;
-
   imageUri?: string;
   isOwnerRestaurant?: boolean;
 };
@@ -113,14 +89,36 @@ const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
 
   const { location } = useLocationState();
-  const { restaurants } = useRestaurants();
+  const { restaurants } = useRestaurants(); // ✅ Datos reales
 
   const [query, setQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const searchBg = isDark ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.78)";
   const searchBorder = isDark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.06)";
 
-  // 1) convertir a items + calcular distancia
+  const todayEvents = useMemo(() => {
+    const events: any[] = [];
+    restaurants.forEach((r) => {
+      if (r.events && r.events.length > 0) {
+        r.events.forEach((e) => {
+          const label = (e.dateLabel || "").toLowerCase();
+          if (label.includes("hoy")) {
+            events.push({
+              id: e.id,
+              title: e.title,
+              subtitle: `${e.dateLabel} · ${r.name}`,
+              badge: "Hoy",
+              restaurantId: r.id,
+            });
+          }
+        });
+      }
+    });
+    return events.reverse(); // Los más nuevos primero
+  }, [restaurants]);
+
+  // 2. Procesar restaurantes y distancia
   const computedRestaurants: RestaurantCardItem[] = useMemo(() => {
     const userCoords = location.coords;
 
@@ -153,10 +151,9 @@ const HomeScreen: React.FC = () => {
       };
     });
 
-    // 2) ordenar por distancia si ya hay coords (manteniendo owner arriba si existe)
     if (location.coords) {
-      const head = base[0]?.isOwnerRestaurant ? [base[0]] : [];
-      const rest = base[0]?.isOwnerRestaurant ? base.slice(1) : base;
+      const head = base.filter((r) => r.isOwnerRestaurant);
+      const rest = base.filter((r) => !r.isOwnerRestaurant);
 
       rest.sort((a, b) => {
         const da = a.distanceMeters ?? Number.POSITIVE_INFINITY;
@@ -170,14 +167,26 @@ const HomeScreen: React.FC = () => {
     return base;
   }, [restaurants, location.coords]);
 
-  // 3) filtro por búsqueda
+  // 3. Filtro
   const filteredRestaurants = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return computedRestaurants;
-    return computedRestaurants.filter((r) =>
-      `${r.name} ${r.category}`.toLowerCase().includes(q)
-    );
-  }, [query, computedRestaurants]);
+    const cat = selectedCategory?.toLowerCase();
+
+    return computedRestaurants.filter((r) => {
+      const matchText =
+        !q || `${r.name} ${r.category}`.toLowerCase().includes(q);
+      const matchCat = !cat || r.category.toLowerCase().includes(cat);
+      return matchText && matchCat;
+    });
+  }, [query, computedRestaurants, selectedCategory]);
+
+  const toggleCategory = (catName: string) => {
+    if (selectedCategory === catName) {
+      setSelectedCategory(null);
+    } else {
+      setSelectedCategory(catName);
+    }
+  };
 
   return (
     <ImageBackground
@@ -192,7 +201,6 @@ const HomeScreen: React.FC = () => {
           barStyle={isDark ? "light-content" : "dark-content"}
         />
 
-        {/* HEADER (solo ubicación, sin notificaciones) */}
         <View style={styles.header}>
           <View style={styles.locationRow}>
             <Ionicons
@@ -243,53 +251,62 @@ const HomeScreen: React.FC = () => {
             )}
           </View>
 
-          {/* EVENTOS DE HOY */}
-          <View style={styles.section}>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: theme.colors.text, fontSize: FONT_SIZES.medium },
-              ]}
-            >
-              Eventos de hoy
-            </Text>
+          {/* ✅ EVENTOS DE HOY (DINÁMICOS) */}
+          {/* Solo mostramos la sección si hay eventos para hoy */}
+          {todayEvents.length > 0 && (
+            <View style={styles.section}>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: theme.colors.text, fontSize: FONT_SIZES.medium },
+                ]}
+              >
+                Eventos de hoy
+              </Text>
 
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingRight: 16 }}
-            >
-              {mockEvents.map((event) => (
-                <TouchableOpacity
-                  key={event.id}
-                  style={[
-                    styles.eventCard,
-                    { backgroundColor: theme.colors.card },
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.eventBadge}>
-                    <Text style={styles.eventBadgeText}>{event.badge}</Text>
-                  </View>
-                  <Text
-                    style={[styles.eventTitle, { color: theme.colors.text }]}
-                    numberOfLines={2}
-                  >
-                    {event.title}
-                  </Text>
-                  <Text
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingRight: 16 }}
+              >
+                {todayEvents.map((event) => (
+                  <TouchableOpacity
+                    key={`${event.restaurantId}-${event.id}`}
                     style={[
-                      styles.eventSubtitle,
-                      { color: theme.colors.textSecondary },
+                      styles.eventCard,
+                      { backgroundColor: theme.colors.card },
                     ]}
-                    numberOfLines={1}
+                    activeOpacity={0.85}
+                    // Al tocar, ir al detalle del restaurante
+                    onPress={() =>
+                      navigation.navigate("CategoryDetail", {
+                        restaurantId: event.restaurantId,
+                      } as any)
+                    }
                   >
-                    {event.subtitle}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+                    <View style={styles.eventBadge}>
+                      <Text style={styles.eventBadgeText}>{event.badge}</Text>
+                    </View>
+                    <Text
+                      style={[styles.eventTitle, { color: theme.colors.text }]}
+                      numberOfLines={2}
+                    >
+                      {event.title}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.eventSubtitle,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {event.subtitle}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
           {/* CATEGORÍAS */}
           <View style={styles.section}>
@@ -307,30 +324,49 @@ const HomeScreen: React.FC = () => {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingRight: 16 }}
             >
-              {mockCategories.map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryChip,
-                    { backgroundColor: theme.colors.card },
-                  ]}
-                  activeOpacity={0.8}
-                >
-                  <View
+              {mockCategories.map((cat) => {
+                const isActive = selectedCategory === cat.name;
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
                     style={[
-                      styles.categoryIconCircle,
-                      { backgroundColor: theme.colors.primary },
+                      styles.categoryChip,
+                      {
+                        backgroundColor: isActive
+                          ? theme.colors.primary
+                          : theme.colors.card,
+                      },
                     ]}
+                    activeOpacity={0.8}
+                    onPress={() => toggleCategory(cat.name)}
                   >
-                    <Ionicons name={cat.icon} size={18} color="#FFFFFF" />
-                  </View>
-                  <Text
-                    style={[styles.categoryText, { color: theme.colors.text }]}
-                  >
-                    {cat.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <View
+                      style={[
+                        styles.categoryIconCircle,
+                        {
+                          backgroundColor: isActive
+                            ? "#FFFFFF"
+                            : theme.colors.primary,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={cat.icon}
+                        size={18}
+                        color={isActive ? theme.colors.primary : "#FFFFFF"}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.categoryText,
+                        { color: isActive ? "#FFFFFF" : theme.colors.text },
+                      ]}
+                    >
+                      {cat.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -342,110 +378,121 @@ const HomeScreen: React.FC = () => {
                 { color: theme.colors.text, fontSize: FONT_SIZES.medium },
               ]}
             >
-              Cerca de ti
+              Cerca de ti {selectedCategory ? `(${selectedCategory})` : ""}
             </Text>
 
-            {filteredRestaurants.map((rest) => (
-              <TouchableOpacity
-                key={rest.id}
-                style={[
-                  styles.restaurantCard,
-                  { backgroundColor: theme.colors.card },
-                ]}
-                activeOpacity={0.9}
-                onPress={() =>
-                  navigation.navigate("CategoryDetail", {
-                    restaurantId: rest.id,
-                  } as any)
-                }
-              >
-                <View style={styles.restaurantLeft}>
-                  {rest.imageUri ? (
-                    <Image
-                      source={{ uri: rest.imageUri }}
-                      style={styles.photoAvatar}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.restaurantAvatar,
-                        { backgroundColor: theme.colors.primary },
-                      ]}
-                    >
-                      <Ionicons name="restaurant" size={20} color="#FFFFFF" />
-                    </View>
-                  )}
+            {filteredRestaurants.length > 0 ? (
+              filteredRestaurants.map((rest) => (
+                <TouchableOpacity
+                  key={rest.id}
+                  style={[
+                    styles.restaurantCard,
+                    { backgroundColor: theme.colors.card },
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    navigation.navigate("CategoryDetail", {
+                      restaurantId: rest.id,
+                    } as any)
+                  }
+                >
+                  <View style={styles.restaurantLeft}>
+                    {rest.imageUri ? (
+                      <Image
+                        source={{ uri: rest.imageUri }}
+                        style={styles.photoAvatar}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.restaurantAvatar,
+                          { backgroundColor: theme.colors.primary },
+                        ]}
+                      >
+                        <Ionicons name="restaurant" size={20} color="#FFFFFF" />
+                      </View>
+                    )}
 
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.titleRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.titleRow}>
+                        <Text
+                          style={[
+                            styles.restaurantName,
+                            { color: theme.colors.text },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {rest.name}
+                        </Text>
+
+                        {rest.isOwnerRestaurant && (
+                          <View
+                            style={[
+                              styles.ownerPill,
+                              { borderColor: theme.colors.primary },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.ownerPillText,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              Tu restaurante
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
                       <Text
                         style={[
-                          styles.restaurantName,
-                          { color: theme.colors.text },
+                          styles.restaurantMeta,
+                          { color: theme.colors.textSecondary },
                         ]}
                         numberOfLines={1}
                       >
-                        {rest.name}
+                        {rest.category} · {rest.distanceLabel}
                       </Text>
 
-                      {rest.isOwnerRestaurant && (
-                        <View
-                          style={[
-                            styles.ownerPill,
-                            { borderColor: theme.colors.primary },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.ownerPillText,
-                              { color: theme.colors.primary },
-                            ]}
-                          >
-                            Tu restaurante
-                          </Text>
-                        </View>
-                      )}
+                      <Text
+                        style={[
+                          styles.restaurantStatus,
+                          { color: theme.colors.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {rest.status}
+                      </Text>
                     </View>
-
-                    <Text
-                      style={[
-                        styles.restaurantMeta,
-                        { color: theme.colors.textSecondary },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {rest.category} · {rest.distanceLabel}
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.restaurantStatus,
-                        { color: theme.colors.textSecondary },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {rest.status}
-                    </Text>
                   </View>
-                </View>
 
-                <View style={styles.restaurantRight}>
-                  <View
-                    style={[styles.ratingBadge, { backgroundColor: searchBg }]}
-                  >
-                    <Ionicons name="star" size={14} color="#FFD166" />
-                    <Text style={styles.ratingText}>
-                      {rest.rating.toFixed(1)}
-                    </Text>
+                  <View style={styles.restaurantRight}>
+                    <View
+                      style={[
+                        styles.ratingBadge,
+                        { backgroundColor: searchBg },
+                      ]}
+                    >
+                      <Ionicons name="star" size={14} color="#FFD166" />
+                      <Text style={styles.ratingText}>
+                        {rest.rating.toFixed(1)}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={theme.colors.textSecondary}
+                    />
                   </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={18}
-                    color={theme.colors.textSecondary}
-                  />
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={{ padding: 20, alignItems: "center" }}>
+                <Text style={{ color: theme.colors.textSecondary }}>
+                  No se encontraron lugares en esta categoría.
+                </Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>

@@ -26,13 +26,9 @@ import OwnerLocationPicker from "../screens/owner/OwnerLocationPicker";
 // Auth global
 import { useAuth } from "../screens/auth/AuthContext";
 
-export type Dish = {
-  id: string;
-  name: string;
-  price: number;
-  description?: string;
-  isAvailable: boolean;
-};
+// ✅ CORRECCIÓN: Importamos el tipo Dish desde el contexto para que coincida
+// (Borramos el "export type Dish = {...}" que estaba aquí antes)
+import { Dish } from "../context/RestaurantsContext";
 
 export type RootStackParamList = {
   // Guest/auth stack
@@ -48,6 +44,7 @@ export type RootStackParamList = {
   OwnerMenuList: undefined;
   OwnerStats: undefined;
   OwnerProfile: undefined;
+  // Ahora "Dish" es el mismo tipo que usa OwnerAddDish y el Contexto
   OwnerAddDish: { mode?: "create" | "edit"; dish?: Dish } | undefined;
   OwnerLocationPicker: undefined;
 };

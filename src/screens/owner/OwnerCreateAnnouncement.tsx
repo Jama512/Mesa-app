@@ -18,13 +18,9 @@ import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RootStackParamList } from "../../navigation/StackNavigator";
 
-import Realm from "realm";
-import { useRealm } from "../../database/realm";
-import { Event } from "../../database/models/EventModel";
+import { useRestaurants } from "../../context/RestaurantsContext";
 
 type Nav = StackNavigationProp<RootStackParamList, "OwnerCreateAnnouncement">;
-
-const OWNER_RESTAURANT_ID = "owner-restaurant";
 
 const MAX_TITLE = 60;
 const MAX_WHEN = 40;
@@ -33,7 +29,7 @@ const MAX_DESC = 220;
 const OwnerCreateAnnouncement: React.FC = () => {
   const { theme } = useTheme();
   const navigation = useNavigation<Nav>();
-  const realm = useRealm();
+  const { addOwnerEvent } = useRestaurants();
 
   const [title, setTitle] = useState("");
   const [whenLabel, setWhenLabel] = useState("");
@@ -45,34 +41,37 @@ const OwnerCreateAnnouncement: React.FC = () => {
 
   const canPublish = cleanTitle.length > 0;
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!canPublish) {
       Alert.alert("Falta título", "Ingresa el título del evento o promo.");
       return;
     }
 
-    realm.write(() => {
-      realm.create(Event, {
-        _id: new Realm.BSON.ObjectId(),
-        restaurantId: OWNER_RESTAURANT_ID,
+    try {
+      // 🛡️ CORRECCIÓN: Construir el objeto limpio
+      const eventData = {
         title: cleanTitle,
         dateLabel: cleanWhen || "Próximamente",
-        description: cleanDesc || undefined,
-        createdAt: new Date(),
-      });
-    });
+        ...(cleanDesc ? { description: cleanDesc } : {}),
+      };
 
-    setTitle("");
-    setWhenLabel("");
-    setDescription("");
+      await addOwnerEvent(eventData);
 
-    Alert.alert("Publicado", "Tu anuncio ya aparece en el Calendario.", [
-      {
-        text: "Ver calendario",
-        onPress: () => navigation.navigate("Home", { screen: "CalendarTab" }),
-      },
-      { text: "OK", style: "cancel", onPress: () => navigation.goBack() },
-    ]);
+      setTitle("");
+      setWhenLabel("");
+      setDescription("");
+
+      Alert.alert("Publicado", "Tu anuncio ya aparece en el Calendario.", [
+        {
+          text: "Ver calendario",
+          onPress: () =>
+            navigation.navigate("Home", { screen: "CalendarTab" } as any),
+        },
+        { text: "OK", style: "cancel", onPress: () => navigation.goBack() },
+      ]);
+    } catch (e) {
+      Alert.alert("Error", "No se pudo publicar el anuncio.");
+    }
   };
 
   return (
@@ -99,7 +98,6 @@ const OwnerCreateAnnouncement: React.FC = () => {
               },
             ]}
           >
-            {/* Título */}
             <View style={styles.labelRow}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
                 Título del evento/promo
@@ -136,7 +134,6 @@ const OwnerCreateAnnouncement: React.FC = () => {
               />
             </View>
 
-            {/* Cuándo */}
             <View style={[styles.labelRow, { marginTop: 10 }]}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
                 ¿Cuándo?
@@ -173,7 +170,6 @@ const OwnerCreateAnnouncement: React.FC = () => {
               />
             </View>
 
-            {/* Descripción */}
             <View style={[styles.labelRow, { marginTop: 10 }]}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
                 Descripción (opcional)

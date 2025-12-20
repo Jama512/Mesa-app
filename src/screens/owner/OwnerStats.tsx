@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
 import OwnerLayout from "./OwnerLayout";
+// ✅ Contexto
 import { useRestaurants } from "../../context/RestaurantsContext";
 import { useAuth } from "../auth/AuthContext";
 import { useNavigation } from "@react-navigation/native";
@@ -32,21 +33,20 @@ const OwnerStats: React.FC = () => {
     const events = r?.events ?? [];
     const eventsCount = events.length;
 
-    // “Alcance” dummy por ahora (luego lo conectas a analytics / firestore)
     const reach = 120 + eventsCount * 18;
     const saves = favorites.length;
 
-    const profile = state.restaurant;
+    // Perfil desde el estado o desde el contexto de restaurantes
+    const profile = r;
     const totalFields = 6;
 
-    // ✅ CORRECCIÓN AQUÍ: Usamos (profile as any) para evitar el error de TypeScript
     const filled =
       (profile?.name ? 1 : 0) +
       (profile?.address ? 1 : 0) +
       (profile?.phone ? 1 : 0) +
       (profile?.description ? 1 : 0) +
-      (typeof (profile as any)?.latitude === "number" ? 1 : 0) +
-      (profile?.features ? 1 : 0);
+      (profile?.latitude ? 1 : 0) +
+      (Object.keys(profile?.features || {}).length > 0 ? 1 : 0);
 
     const profilePct = Math.round((filled / totalFields) * 100);
 
@@ -62,7 +62,7 @@ const OwnerStats: React.FC = () => {
       profilePct,
       latestEvents,
     };
-  }, [ownerRestaurant, favorites.length, state.restaurant]);
+  }, [ownerRestaurant, favorites.length]);
 
   const goTo = (screen: keyof RootStackParamList, params?: any) => {
     // @ts-ignore
@@ -159,8 +159,7 @@ const OwnerStats: React.FC = () => {
         </View>
 
         <Text style={[styles.note, { color: theme.colors.textSecondary }]}>
-          * “Alcance” es estimado por ahora. Luego lo conectas a
-          Firebase/Analytics.
+          Alcance Fijo, aun sin implementar Analitycs
         </Text>
       </View>
 

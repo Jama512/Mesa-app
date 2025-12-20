@@ -15,36 +15,29 @@ import OwnerLayout from "./OwnerLayout";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RootStackParamList } from "../../navigation/StackNavigator";
-import { useRestaurants } from "../../context/RestaurantsContext";
 
-// ✅ 1. IMPORTAR REALM Y EL MODELO
-import { useQuery, useRealm } from "../../database/realm";
-import { Dish } from "../../database/models/DishModel";
+// ✅ ÚNICA IMPORTACIÓN DE DISH (Desde el contexto, NO desde database)
+import { useRestaurants, Dish } from "../../context/RestaurantsContext";
 
 type FilterKey = "all" | "available" | "unavailable";
 type Nav = StackNavigationProp<RootStackParamList, "OwnerMenuList">;
-
-const OWNER_ID = "owner-restaurant"; // Mismo ID que usamos en OwnerAddDish
 
 const OwnerMenuList: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
   const navigation = useNavigation<Nav>();
 
-  // ✅ 2. HOOKS DE REALM
-  const realm = useRealm();
-  // Traemos los platos del dueño, ordenados por fecha de creación (si existe) o nombre
-  const dishes = useQuery(Dish)
-    .filtered("restaurantId == $0", OWNER_ID)
-    .sorted("createdAt", true); // true = descendente (nuevos arriba)
-
-  // Contexto para el estado del restaurante (Abierto/Cerrado)
-  const { restaurants, upsertOwnerRestaurant } = useRestaurants();
+  // ✅ USAR SOLO EL CONTEXTO (Nada de Realm)
+  const { restaurants, upsertOwnerRestaurant, removeDish } = useRestaurants();
 
   const ownerRestaurant = useMemo(
     () => restaurants.find((r) => r.isOwnerRestaurant) ?? null,
     [restaurants]
   );
+
+  // ✅ Obtener menú del objeto restaurante (o array vacío si no existe)
+  // Esto sustituye a "useQuery(Dish)"
+  const dishes = useMemo(() => ownerRestaurant?.menu || [], [ownerRestaurant]);
 
   const ownerStatus = ownerRestaurant?.status ?? "Abierto ahora";
   const isOpen = /abierto/i.test(ownerStatus);
@@ -52,11 +45,9 @@ const OwnerMenuList: React.FC = () => {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
 
-  // ✅ 3. LÓGICA DE FILTRADO (Sobre los datos de Realm)
+  // Lógica de filtrado
   const filteredDishes = useMemo(() => {
     const q = query.trim().toLowerCase();
-
-    // Convertimos Realm Results a Array para filtrar en memoria (rápido para listas pequeñas/medianas)
     return dishes.filter((d) => {
       const matchQuery =
         !q ||
@@ -67,15 +58,15 @@ const OwnerMenuList: React.FC = () => {
         filter === "all"
           ? true
           : filter === "available"
-          ? d.isAvailable
-          : !d.isAvailable;
+          ? d.isAvailable !== false // true o undefined cuenta como disponible
+          : d.isAvailable === false;
 
       return matchQuery && matchFilter;
     });
   }, [dishes, query, filter]);
 
   const totalCount = dishes.length;
-  const availableCount = dishes.filter((d) => d.isAvailable).length;
+  const availableCount = dishes.filter((d) => d.isAvailable !== false).length;
 
   const headerSubtitle = useMemo(() => {
     if (totalCount === 0) return "Aún no tienes platillos registrados.";
@@ -88,22 +79,11 @@ const OwnerMenuList: React.FC = () => {
     navigation.navigate("OwnerAddDish", { mode: "create" });
   };
 
-  const goToEditDish = (item: Dish) => {
-    // ✅ ADAPTADOR: Realm (_id) -> Navigation (id)
-    // OwnerAddDish espera un objeto con 'id', pero Realm tiene '_id'.
-    // Creamos un objeto plano compatible para pasar por navegación.
-    const dishParam = {
-      id: item._id, // Mapeamos _id a id
-      name: item.name,
-      price: item.price,
-      description: item.description || undefined,
-      isAvailable: item.isAvailable,
-    };
-
-    navigation.navigate("OwnerAddDish", { mode: "edit", dish: dishParam });
+  const goToEditDish = (item: Dish) =>  {
+    navigation.navigate("OwnerAddDish", { mode: "edit", dish: item });
   };
 
-  // ✅ 4. ELIMINAR EN REALM
+  // ✅ ELIMINAR (Usando función del contexto)
   const handleDelete = (item: Dish) => {
     Alert.alert(
       "Eliminar platillo",
@@ -113,21 +93,30 @@ const OwnerMenuList: React.FC = () => {
         {
           text: "Eliminar",
           style: "destructive",
-          onPress: () => {
-            realm.write(() => {
-              realm.delete(item); // Realm elimina el objeto vivo directamente
-            });
+          onPress: async () => {
+            if (removeDish) {
+              await removeDish(item.id);
+            } else {
+              // Fallback si removeDish no está disponible directamente:
+              // Filtrar manual y actualizar el array completo en Firestore
+              const newMenu = dishes.filter((d) => d.id !== item.id);
+              upsertOwnerRestaurant({ menu: newMenu });
+            }
           },
         },
       ]
     );
   };
 
-  // ✅ 5. TOGGLE DISPONIBILIDAD EN REALM
+  // ✅ TOGGLE DISPONIBILIDAD (Actualizar array en Firestore)
   const toggleAvailability = (item: Dish) => {
-    realm.write(() => {
-      item.isAvailable = !item.isAvailable;
+    const newMenu = dishes.map((d) => {
+      if (d.id === item.id) {
+        return { ...d, isAvailable: !d.isAvailable };
+      }
+      return d;
     });
+    upsertOwnerRestaurant({ menu: newMenu });
   };
 
   const toggleOpenClosed = () => {
@@ -214,7 +203,6 @@ const OwnerMenuList: React.FC = () => {
 
   return (
     <OwnerLayout title="Menú" subtitle={headerSubtitle} showBack>
-      {/* Top row */}
       <View style={styles.topRow}>
         <TouchableOpacity
           style={[styles.addBtn, { backgroundColor: theme.colors.primary }]}
@@ -228,7 +216,6 @@ const OwnerMenuList: React.FC = () => {
         <StatusPill />
       </View>
 
-      {/* Search */}
       <View
         style={[
           styles.searchWrap,
@@ -264,15 +251,14 @@ const OwnerMenuList: React.FC = () => {
 
       <FilterBar />
 
-      {/* List */}
       {filteredDishes.length > 0 ? (
         <FlatList
           data={filteredDishes}
-          keyExtractor={(d) => d._id} // ✅ Usamos _id de Realm
+          keyExtractor={(d) => d.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
-            const available = item.isAvailable;
+            const available = item.isAvailable !== false;
 
             return (
               <View

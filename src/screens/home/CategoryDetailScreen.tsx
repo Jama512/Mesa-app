@@ -10,6 +10,9 @@ import {
   ScrollView,
   ImageBackground,
   Image,
+  Linking, // ✅ 1. Importar Linking
+  Platform, // ✅ 2. Importar Platform
+  Alert,
 } from "react-native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RouteProp } from "@react-navigation/native";
@@ -17,12 +20,9 @@ import { RootStackParamList } from "../../navigation/StackNavigator";
 import { useTheme } from "../../theme/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 
+// ✅ Usamos solo los contextos
 import { useRestaurants } from "../../context/RestaurantsContext";
 import { useLocationState } from "../../context/LocationContext";
-
-// ✅ 1. IMPORTAR REALM Y EL MODELO DISH
-import { useQuery } from "../../database/realm";
-import { Dish } from "../../database/models/DishModel";
 
 type Nav = StackNavigationProp<RootStackParamList, "CategoryDetail">;
 type Rte = RouteProp<RootStackParamList, "CategoryDetail">;
@@ -59,13 +59,14 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { restaurants, favorites, toggleFavorite } = useRestaurants();
   const { location } = useLocationState();
 
-  // ✅ 2. CONSULTA DE PLATILLOS (Filtrados por este restaurante)
-  const dishes = useQuery(Dish).filtered("restaurantId == $0", restaurantId);
-
+  // 1. BUSCAR EL RESTAURANTE EN EL CONTEXTO
   const restaurant = useMemo(
     () => restaurants.find((r) => r.id === restaurantId),
     [restaurants, restaurantId]
   );
+
+  // 2. LEER PLATILLOS DEL MENÚ
+  const dishes = useMemo(() => restaurant?.menu || [], [restaurant]);
 
   const isFav = favorites.includes(restaurantId);
 
@@ -83,8 +84,38 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [restaurant?.latitude, restaurant?.longitude, location.coords]);
 
   const [activeTab, setActiveTab] = useState<"menu" | "events" | "info">(
-    "info" // Puedes cambiar el default a "menu" si prefieres
+    "menu"
   );
+
+  // ✅ 3. FUNCIÓN PARA ABRIR MAPAS
+  const handleOpenMaps = () => {
+    if (!restaurant?.latitude || !restaurant?.longitude) {
+      Alert.alert(
+        "Lo sentimos",
+        "Este restaurante no tiene ubicación registrada."
+      );
+      return;
+    }
+
+    const lat = restaurant.latitude;
+    const lng = restaurant.longitude;
+    const label = encodeURIComponent(restaurant.name);
+
+    let url = "";
+
+    if (Platform.OS === "ios") {
+      // Apple Maps
+      url = `maps:0,0?q=${label}@${lat},${lng}`;
+    } else {
+      // Google Maps (Android)
+      url = `geo:0,0?q=${lat},${lng}(${label})`;
+    }
+
+    Linking.openURL(url).catch((err) => {
+      console.error("Error abriendo mapa:", err);
+      Alert.alert("Error", "No se pudo abrir la aplicación de mapas.");
+    });
+  };
 
   if (!restaurant) {
     return (
@@ -176,7 +207,7 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={[styles.tabBar, { backgroundColor: theme.colors.card }]}>
             {[
               { key: "menu", label: "Menú" },
-              { key: "events", label: "Eventos/Promos" },
+              { key: "events", label: "Eventos" },
               { key: "info", label: "Info" },
             ].map((t) => {
               const selected = activeTab === (t.key as any);
@@ -213,7 +244,6 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
           {/* CONTENT */}
           <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-            {/* ✅ SECCIÓN MENÚ CONECTADA A REALM */}
             {activeTab === "menu" && (
               <View>
                 {dishes.length === 0 ? (
@@ -235,16 +265,24 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 ) : (
                   dishes.map((dish) => (
                     <View
-                      key={dish._id}
+                      key={dish.id}
                       style={[
                         styles.dishCard,
                         {
                           backgroundColor: theme.colors.card,
                           borderColor: theme.colors.border,
-                          opacity: dish.isAvailable ? 1 : 0.6,
+                          opacity: dish.isAvailable !== false ? 1 : 0.6,
                         },
                       ]}
                     >
+                      {/* Mostrar imagen si existe */}
+                      {dish.image && (
+                        <Image
+                          source={{ uri: dish.image }}
+                          style={styles.dishImage}
+                        />
+                      )}
+
                       <View style={{ flex: 1 }}>
                         <Text
                           style={[
@@ -264,7 +302,7 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                             {dish.description}
                           </Text>
                         )}
-                        {!dish.isAvailable && (
+                        {dish.isAvailable === false && (
                           <Text
                             style={{
                               color: "#ef4444",
@@ -348,6 +386,19 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                         >
                           {e.dateLabel}
                         </Text>
+                        {e.description && (
+                          <Text
+                            style={[
+                              styles.eventDate,
+                              {
+                                color: theme.colors.textSecondary,
+                                marginTop: 4,
+                              },
+                            ]}
+                          >
+                            {e.description}
+                          </Text>
+                        )}
                       </View>
                     </View>
                   ))
@@ -433,9 +484,11 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       <Chip label="Tarjeta" />
                     )}
 
-                    {!restaurant.features && (
+                    {!Object.values(restaurant.features || {}).some(
+                      Boolean
+                    ) && (
                       <Text style={{ color: theme.colors.textSecondary }}>
-                        (Sin servicios configurados)
+                        (Sin servicios especificados)
                       </Text>
                     )}
                   </View>
@@ -449,9 +502,7 @@ const CategoryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <TouchableOpacity
           style={[styles.fab, { backgroundColor: theme.colors.primary }]}
           activeOpacity={0.85}
-          onPress={() => {
-            // Luego abrimos Google Maps con coords del restaurante
-          }}
+          onPress={handleOpenMaps} // ✅ CONECTADO AL HANDLER
         >
           <Ionicons name="navigate" size={18} color="#fff" />
           <Text style={styles.fabText}>Cómo llegar</Text>
@@ -520,7 +571,6 @@ const styles = StyleSheet.create({
   card: { borderRadius: 14, padding: 14 },
   cardTitle: { fontSize: 15, fontWeight: "700" },
 
-  // Estilos para platillos (Menú)
   dishCard: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -529,6 +579,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 10,
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  dishImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 10,
+    backgroundColor: "#ccc",
   },
   dishName: { fontSize: 14, fontWeight: "700" },
   dishDesc: { fontSize: 12, marginTop: 4, lineHeight: 16 },

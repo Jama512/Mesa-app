@@ -34,16 +34,20 @@ const ProfileScreen: React.FC = () => {
   const isOwner = state.role === "owner";
   const ownerEmail = state.email ?? "Usuario invitado";
 
-  const handleOwnerButton = () => {
+  // ✅ 1. Acción del Botón Principal
+  const handleMainButton = () => {
     if (isOwner) {
-      // ✅ Importante: NO reset a "Welcome"
-      // Tu StackNavigator se remonta solo por el key guest/owner
-      logout();
-      return;
+      // Si ya es dueño, navegar al Dashboard
+      navigation.navigate("OwnerDashboard" as any);
+    } else {
+      // Si es invitado, ir al Login
+      navigation.navigate("Login");
     }
+  };
 
-    // ✅ Ir a login de dueños (Stack)
-    navigation.navigate("Login");
+  // ✅ 2. Acción de Cerrar Sesión (Separada)
+  const handleLogout = () => {
+    logout();
   };
 
   return (
@@ -138,21 +142,37 @@ const ProfileScreen: React.FC = () => {
       {/* CTA DUEÑO / SESIÓN */}
       <View style={styles.footer}>
         <Text style={[styles.footerLabel, { color: theme.colors.text }]}>
-          ¿Eres dueño?
+          {isOwner ? "Administración" : "¿Eres dueño?"}
         </Text>
 
+        {/* Botón Principal: Login o Ir al Dashboard */}
         <TouchableOpacity
           style={[
             styles.ownerButton,
             { backgroundColor: theme.colors.primary },
           ]}
-          onPress={handleOwnerButton}
+          onPress={handleMainButton}
           activeOpacity={0.9}
         >
           <Text style={styles.ownerButtonText}>
-            {isOwner ? "Cerrar sesión" : "Inicia sesión como dueño"}
+            {isOwner
+              ? "Ir a mi Panel de Restaurante"
+              : "Inicia sesión como dueño"}
           </Text>
         </TouchableOpacity>
+
+        {/* Botón Secundario: Cerrar Sesión (Solo si es dueño) */}
+        {isOwner && (
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.logoutText, { color: "#EF4444" }]}>
+              Cerrar sesión
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <Text
           style={[styles.footerCaption, { color: theme.colors.textSecondary }]}
@@ -204,12 +224,22 @@ const styles = StyleSheet.create({
   chevron: { fontSize: 18, fontWeight: "600" },
   footer: { marginTop: 24, alignItems: "center", paddingHorizontal: 24 },
   footerLabel: { fontSize: 13, marginBottom: 8 },
+
   ownerButton: {
     paddingHorizontal: 24,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 999,
+    width: "100%",
+    alignItems: "center",
   },
   ownerButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+
+  logoutButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  logoutText: { fontSize: 13, fontWeight: "600" },
+
   footerCaption: { fontSize: 11, marginTop: 6, textAlign: "center" },
 });
 

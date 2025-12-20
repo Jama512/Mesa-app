@@ -8,7 +8,6 @@ import {
   ImageBackground,
   TouchableOpacity,
   FlatList,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,9 +21,6 @@ import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RootTabParamList } from "../../navigation/TabNavigator";
 import { RootStackParamList } from "../../navigation/StackNavigator";
-
-import { useQuery, useRealm } from "../../database/realm";
-import { Event } from "../../database/models/EventModel";
 
 type TabNav = BottomTabNavigationProp<RootTabParamList, "CalendarTab">;
 type StackNav = StackNavigationProp<RootStackParamList>;
@@ -45,54 +41,65 @@ const CalendarScreen: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
   const navigation = useNavigation<Nav>();
-  const realm = useRealm();
 
   const { restaurants } = useRestaurants();
-  const events = useQuery(Event);
 
   const [selectedDay, setSelectedDay] = useState<"Hoy" | "Semana" | "Mes">(
     "Hoy"
   );
 
   const items: CalendarItem[] = useMemo(() => {
-    // por ahora el filtro Hoy/Semana/Mes es visual (dateLabel es texto)
-    const list = Array.from(events).map((e) => {
-      const rid = e.restaurantId;
-      const r = restaurants.find((x) => x.id === rid);
-      return {
-        id: e._id.toHexString(),
-        restaurantId: rid,
-        title: e.title,
-        subtitle: r?.name ?? "Restaurante",
-        dateLabel: e.dateLabel,
-        description: e.description,
-      };
+    const allEvents: CalendarItem[] = [];
+
+    restaurants.forEach((r) => {
+      if (r.events && r.events.length > 0) {
+        r.events.forEach((e) => {
+          allEvents.push({
+            id: e.id,
+            restaurantId: r.id,
+            title: e.title,
+            subtitle: r.name,
+            // 🛡️ CORRECCIÓN: Asegurar que dateLabel sea string
+            dateLabel: e.dateLabel || "",
+            description: e.description,
+          });
+        });
+      }
     });
 
-    // recientes arriba
-    return list.reverse();
-  }, [events, restaurants, selectedDay]);
+    const filtered = allEvents.filter((item) => {
+      // 🛡️ CORRECCIÓN: Proteger contra null/undefined
+      const label = (item.dateLabel || "").toLowerCase();
+
+      if (selectedDay === "Hoy") {
+        return label.includes("hoy");
+      }
+      if (selectedDay === "Semana") {
+        const weekKeywords = [
+          "lunes",
+          "martes",
+          "miércoles",
+          "miercoles",
+          "jueves",
+          "viernes",
+          "sábado",
+          "sabado",
+          "domingo",
+          "mañana",
+          "semana",
+          "fin de semana",
+          "hoy",
+        ];
+        return weekKeywords.some((kw) => label.includes(kw));
+      }
+      return true;
+    });
+
+    return filtered.reverse();
+  }, [restaurants, selectedDay]);
 
   const openRestaurant = (restaurantId: string) => {
     navigation.navigate("CategoryDetail", { restaurantId });
-  };
-
-  const removeEvent = (idHex: string) => {
-    Alert.alert("Eliminar anuncio", "¿Deseas eliminar este anuncio?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Eliminar",
-        style: "destructive",
-        onPress: () => {
-          try {
-            const objId = new (require("realm").BSON.ObjectId)(idHex);
-            const ev = realm.objectForPrimaryKey(Event, objId);
-            if (!ev) return;
-            realm.write(() => realm.delete(ev));
-          } catch {}
-        },
-      },
-    ]);
   };
 
   return (
@@ -109,7 +116,6 @@ const CalendarScreen: React.FC = () => {
         style={styles.bg}
         imageStyle={{ opacity: isDark ? 0.07 : 0.12 }}
       >
-        {/* HEADER */}
         <View
           style={[
             styles.header,
@@ -164,11 +170,10 @@ const CalendarScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* LISTA */}
         {items.length > 0 ? (
           <FlatList
             data={items}
-            keyExtractor={(it) => it.id}
+            keyExtractor={(it) => `${it.restaurantId}-${it.id}`}
             contentContainerStyle={styles.listContent}
             renderItem={({ item }) => (
               <TouchableOpacity
@@ -181,7 +186,6 @@ const CalendarScreen: React.FC = () => {
                   },
                 ]}
                 onPress={() => openRestaurant(item.restaurantId)}
-                onLongPress={() => removeEvent(item.id)}
               >
                 <View style={styles.cardLeft}>
                   <View
@@ -256,12 +260,15 @@ const CalendarScreen: React.FC = () => {
             <Text
               style={[styles.emptyText, { color: theme.colors.textSecondary }]}
             >
-              Aún no hay promociones publicadas.
+              {selectedDay === "Hoy"
+                ? "No hay eventos para hoy."
+                : "No hay eventos próximos."}
             </Text>
             <Text
               style={[styles.emptyHint, { color: theme.colors.textSecondary }]}
             >
-              Cuando un restaurante publique un evento, aparecerá aquí.
+              Prueba cambiando de pestaña o espera a que publiquen nuevas
+              promos.
             </Text>
           </View>
         )}

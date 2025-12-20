@@ -7,12 +7,20 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage"; // ✅ Importar
 import { Alert } from "react-native";
 
-// Clave para guardar en el disco del celular
-const AUTH_STORAGE_KEY = "MESA_AUTH_STATE_V1";
+// ✅ Importamos Firebase Auth y Firestore
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  User,
+} from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore";
+import { auth, db } from "../../config/firebaseConfig"; // Tu archivo de configuración
 
+// Tipos
 type UserRole = "guest" | "owner";
 
 export interface RestaurantProfile {
@@ -22,6 +30,8 @@ export interface RestaurantProfile {
   description?: string;
   features?: any;
   images?: string[];
+  latitude?: number;
+  longitude?: number;
 }
 
 interface AuthState {
@@ -29,17 +39,20 @@ interface AuthState {
   role: UserRole;
   email?: string;
   restaurant?: RestaurantProfile;
-  isLoading: boolean; // ✅ Nuevo estado para no mostrar Login mientras carga
+  isLoading: boolean;
+  userId?: string; // ✅ Guardamos el UID de Firebase
 }
 
 interface LoginPayload {
   email: string;
+  password?: string;
   restaurantName?: string;
 }
 
 interface AuthContextValue {
   state: AuthState;
-  loginAsOwner: (data: LoginPayload) => Promise<void>;
+  loginAsOwner: (data: LoginPayload) => Promise<boolean>;
+  registerOwner: (data: LoginPayload) => Promise<boolean>;
   continueAsGuest: () => void;
   logout: () => void;
   updateRestaurant: (data: Partial<RestaurantProfile>) => void;
@@ -55,84 +68,150 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [state, setState] = useState<AuthState>({
     isAuthenticated: false,
     role: "guest",
-    isLoading: true, // Empieza cargando
+    isLoading: true,
   });
 
-  // 1. CARGAR SESIÓN AL INICIAR LA APP (Offline Login) 🔄
+  // 1. ESCUCHAR CAMBIOS DE SESIÓN (Firebase lo hace automático) 🎧
   useEffect(() => {
-    const loadSession = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // Restauramos la sesión guardada
-          setState({ ...parsed, isLoading: false });
-        } else {
-          // No había sesión
-          setState((prev) => ({ ...prev, isLoading: false }));
+    console.log("AuthProvider: Iniciando listener de Firebase Auth...");
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        console.log("Usuario detectado:", firebaseUser.email);
+
+        // Usuario logueado: Intentamos leer su nombre de restaurante de Firestore
+        let restName = DEFAULT_RESTAURANT_NAME;
+        let restData: Partial<RestaurantProfile> = {};
+
+        try {
+          const docRef = doc(db, "restaurants", firebaseUser.uid);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            restName = data.name || restName;
+            // Cargamos datos básicos al estado global
+            restData = {
+              name: restName,
+              latitude: data.latitude,
+              longitude: data.longitude,
+            };
+          }
+        } catch (e) {
+          console.log("Error leyendo perfil al iniciar:", e);
         }
-      } catch (e) {
-        console.error("Error cargando sesión", e);
-        setState((prev) => ({ ...prev, isLoading: false }));
+
+        setState({
+          isAuthenticated: true,
+          role: "owner",
+          email: firebaseUser.email || "",
+          userId: firebaseUser.uid,
+          restaurant: { name: restName, ...restData },
+          isLoading: false,
+        });
+      } else {
+        console.log("No hay usuario logueado.");
+        // Usuario no logueado (o logout)
+        setState((prev) => ({
+          ...prev,
+          isAuthenticated: false,
+          role: "guest",
+          email: undefined,
+          userId: undefined,
+          restaurant: undefined,
+          isLoading: false,
+        }));
       }
-    };
-    loadSession();
+    });
+
+    return () => unsubscribe(); // Limpiar al desmontar
   }, []);
 
-  // 2. GUARDAR SESIÓN CADA VEZ QUE CAMBIA 💾
-  useEffect(() => {
-    if (!state.isLoading) {
-      const saveState = {
-        isAuthenticated: state.isAuthenticated,
-        role: state.role,
-        email: state.email,
-        restaurant: state.restaurant,
-      };
-      AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(saveState)).catch(
-        (e) => console.error("Error guardando auth", e)
-      );
+  // 2. REGISTRO (Auth + Firestore) 📝
+  const registerOwner = useCallback(async (data: LoginPayload) => {
+    if (!data.password) {
+      Alert.alert("Error", "La contraseña es obligatoria.");
+      return false;
     }
-  }, [
-    state.isAuthenticated,
-    state.role,
-    state.email,
-    state.restaurant,
-    state.isLoading,
-  ]);
 
-  // LOGIN (Actualiza estado + Persistencia automática por el useEffect de arriba)
+    try {
+      // a) Crear usuario en Firebase Authentication
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        data.email,
+        data.password
+      );
+      const uid = userCredential.user.uid;
+
+      // b) Crear inmediatamente el documento en Firestore
+      // Usamos el UID como ID del documento para vincularlos fácil
+      await setDoc(doc(db, "restaurants", uid), {
+        ownerId: uid,
+        name: data.restaurantName || "Nuevo Restaurante",
+        email: data.email,
+        createdAt: new Date().toISOString(),
+        status: "Abierto ahora",
+        rating: 5.0,
+        category: "General",
+      });
+
+      return true;
+    } catch (error: any) {
+      console.error("Error en registro:", error);
+      let msg = "No se pudo crear la cuenta.";
+      if (error.code === "auth/email-already-in-use")
+        msg = "Ese correo ya está registrado.";
+      if (error.code === "auth/weak-password")
+        msg = "La contraseña es muy débil (usa 6+ caracteres).";
+      if (error.code === "auth/invalid-email") msg = "El correo no es válido.";
+
+      Alert.alert("Error de registro", msg);
+      return false;
+    }
+  }, []);
+
+  // 3. LOGIN 🔑
   const loginAsOwner = useCallback(async (data: LoginPayload) => {
-    setState((prev) => ({
-      ...prev,
-      isAuthenticated: true,
-      role: "owner",
-      email: data.email,
-      restaurant: {
-        name: data.restaurantName || DEFAULT_RESTAURANT_NAME,
-      },
-    }));
+    if (!data.password) {
+      Alert.alert("Error", "Ingresa tu contraseña.");
+      return false;
+    }
+
+    try {
+      await signInWithEmailAndPassword(auth, data.email, data.password);
+      // No necesitamos hacer setState aquí manual, el onAuthStateChanged lo hará solo
+      return true;
+    } catch (error: any) {
+      console.error("Error en login:", error);
+      let msg = "Error al iniciar sesión.";
+      if (
+        error.code === "auth/invalid-credential" ||
+        error.code === "auth/user-not-found" ||
+        error.code === "auth/wrong-password"
+      ) {
+        msg = "Correo o contraseña incorrectos.";
+      } else if (error.code === "auth/too-many-requests") {
+        msg = "Demasiados intentos fallidos. Intenta más tarde.";
+      }
+
+      Alert.alert("Error de acceso", msg);
+      return false;
+    }
   }, []);
 
   const continueAsGuest = useCallback(() => {
     setState((prev) => ({
       ...prev,
-      isAuthenticated: true, // Invitado también cuenta como "dentro" para navegar
+      isAuthenticated: true, // Invitado cuenta como "dentro"
       role: "guest",
     }));
   }, []);
 
   const logout = useCallback(async () => {
     try {
-      await AsyncStorage.removeItem(AUTH_STORAGE_KEY); // Borrar del disco
-      setState({
-        isAuthenticated: false,
-        role: "guest",
-        email: undefined,
-        restaurant: undefined,
-        isLoading: false,
-      });
+      await signOut(auth);
+      // El onAuthStateChanged detectará null y limpiará el estado
     } catch (e) {
-      Alert.alert("Error", "No se pudo cerrar sesión");
+      console.error(e);
+      Alert.alert("Error", "No se pudo cerrar sesión.");
     }
   }, []);
 
@@ -150,17 +229,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     () => ({
       state,
       loginAsOwner,
+      registerOwner,
       continueAsGuest,
       logout,
       updateRestaurant,
     }),
-    [state, loginAsOwner, continueAsGuest, logout, updateRestaurant]
+    [
+      state,
+      loginAsOwner,
+      registerOwner,
+      continueAsGuest,
+      logout,
+      updateRestaurant,
+    ]
   );
 
-  // Evitamos renderizar la app hasta saber si hay usuario guardado
-  // (Opcional: podrías mostrar un Splash Screen aquí)
+  // Pantalla de carga inicial mientras Firebase verifica la sesión
   if (state.isLoading) {
-    return null;
+    return null; // O podrías poner un <ActivityIndicator /> aquí
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

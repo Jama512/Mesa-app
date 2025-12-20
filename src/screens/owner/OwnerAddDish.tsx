@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView,
   Switch,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
@@ -18,19 +19,16 @@ import OwnerLayout from "./OwnerLayout";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { RootStackParamList } from "../../navigation/StackNavigator";
+import * as ImagePicker from "expo-image-picker";
 
-// ✅ IMPORTAR REALM Y EL MODELO (Clase)
-import Realm from "realm";
-import { useRealm } from "../../database/realm";
-import { Dish } from "../../database/models/DishModel";
+// ✅ Usar Contexto
+import { useRestaurants, Dish } from "../../context/RestaurantsContext";
 
 type Nav = StackNavigationProp<RootStackParamList, "OwnerAddDish">;
 type Rt = RouteProp<RootStackParamList, "OwnerAddDish">;
 
 const MAX_NAME = 50;
 const MAX_DESC = 140;
-
-const OWNER_ID = "owner-restaurant";
 
 const sanitizePrice = (t: string) => {
   const x = t.replace(",", ".").replace(/[^0-9.]/g, "");
@@ -44,12 +42,12 @@ const OwnerAddDish: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
 
-  const realm = useRealm();
+  const { restaurants, upsertOwnerRestaurant, addDish } = useRestaurants();
+  const ownerRestaurant = restaurants.find((r) => r.isOwnerRestaurant);
 
   const mode = route.params?.mode ?? "create";
   const editingDish = route.params?.dish;
 
-  // Estados iniciales
   const [name, setName] = useState(editingDish?.name ?? "");
   const [priceText, setPriceText] = useState(
     editingDish ? String(editingDish.price) : ""
@@ -60,14 +58,16 @@ const OwnerAddDish: React.FC = () => {
   const [isAvailable, setIsAvailable] = useState(
     editingDish?.isAvailable ?? true
   );
+  const [imageUri, setImageUri] = useState<string | null>(
+    (editingDish as any)?.image ?? null
+  );
+  const [isSaving, setIsSaving] = useState(false);
 
   const cleanName = useMemo(() => name.trim().replace(/\s{2,}/g, " "), [name]);
-
   const priceNumber = useMemo(() => {
     const v = Number(sanitizePrice(priceText));
     return Number.isFinite(v) ? v : NaN;
   }, [priceText]);
-
   const cleanDesc = useMemo(
     () => description.trim().replace(/\s{2,}/g, " "),
     [description]
@@ -80,10 +80,27 @@ const OwnerAddDish: React.FC = () => {
   const titleText = mode === "edit" ? "Editar platillo" : "Agregar platillo";
   const subtitleText =
     mode === "edit"
-      ? "Actualiza nombre, precio y disponibilidad."
+      ? "Actualiza nombre, precio y foto."
       : "Crea un nuevo platillo para tu menú.";
 
-  const onSave = () => {
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.7,
+      });
+
+      if (!result.canceled) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch (e) {
+      Alert.alert("Error", "No pudimos abrir la galería.");
+    }
+  };
+
+  const onSave = async () => {
     if (!canSave) {
       Alert.alert(
         "Datos incompletos",
@@ -94,35 +111,45 @@ const OwnerAddDish: React.FC = () => {
       return;
     }
 
+    setIsSaving(true);
     try {
-      const idToSave = editingDish?.id ?? String(Date.now());
+      // 🛡️ CORRECCIÓN: Evitar campos undefined
+      const dishData: Dish = {
+        id: editingDish?.id ?? String(Date.now()),
+        name: cleanName,
+        price: Number(priceNumber),
+        isAvailable: isAvailable,
+        // Usamos el operador spread (...) condicional para agregar solo si existen
+        ...(cleanDesc ? { description: cleanDesc } : {}),
+        ...(imageUri ? { image: imageUri } : {}),
+      };
 
-      realm.write(() => {
-        // ✅ USAMOS LA CLASE 'Dish' DIRECTAMENTE PARA MAYOR SEGURIDAD
-        realm.create(
-          Dish,
-          {
-            _id: idToSave,
-            restaurantId: OWNER_ID,
-            name: cleanName,
-            price: Number(priceNumber),
-            description: cleanDesc || undefined,
-            isAvailable: isAvailable,
-            // Solo asignamos fecha si es nuevo para no sobrescribir
-            ...(mode === "create" && { createdAt: new Date() }),
-          },
-          Realm.UpdateMode.Modified
+      if (mode === "create") {
+        if (addDish) {
+          await addDish(dishData);
+        } else {
+          const currentMenu = ownerRestaurant?.menu || [];
+          const newMenu = [...currentMenu, dishData];
+          await upsertOwnerRestaurant({ menu: newMenu });
+        }
+      } else {
+        const currentMenu = ownerRestaurant?.menu || [];
+        const newMenu = currentMenu.map((d) =>
+          d.id === dishData.id ? dishData : d
         );
-      });
+        await upsertOwnerRestaurant({ menu: newMenu });
+      }
 
       Alert.alert(
         mode === "edit" ? "Actualizado" : "Agregado",
-        "Tu menú se ha actualizado en la base de datos.",
+        "Menú actualizado.",
         [{ text: "OK", onPress: () => navigation.goBack() }]
       );
     } catch (error) {
-      console.error("Error guardando en Realm:", error);
+      console.error("Error guardando:", error);
       Alert.alert("Error", "No se pudo guardar el platillo.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -146,53 +173,49 @@ const OwnerAddDish: React.FC = () => {
               },
             ]}
           >
-            {/* Badge modo */}
-            <View style={styles.modeRow}>
-              <View
-                style={[
-                  styles.modePill,
-                  {
-                    backgroundColor:
-                      mode === "edit"
-                        ? "rgba(59,130,246,0.12)"
-                        : "rgba(34,197,94,0.12)",
-                    borderColor:
-                      mode === "edit"
-                        ? "rgba(59,130,246,0.35)"
-                        : "rgba(34,197,94,0.35)",
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={
-                    mode === "edit" ? "create-outline" : "add-circle-outline"
-                  }
-                  size={14}
-                  color={mode === "edit" ? "#3b82f6" : "#16a34a"}
-                />
-                <Text
-                  style={[
-                    styles.modeText,
-                    { color: mode === "edit" ? "#3b82f6" : "#16a34a" },
-                  ]}
+            <View style={styles.imageSection}>
+              <TouchableOpacity onPress={pickImage} activeOpacity={0.9}>
+                {imageUri ? (
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={styles.previewImage}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.imagePlaceholder,
+                      {
+                        backgroundColor: theme.colors.background,
+                        borderColor: theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="camera-outline"
+                      size={32}
+                      color={theme.colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.imageText,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                    >
+                      Agregar foto
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              {imageUri && (
+                <TouchableOpacity
+                  onPress={() => setImageUri(null)}
+                  style={styles.removeImageBtn}
                 >
-                  {mode === "edit" ? "Editando" : "Nuevo"}
-                </Text>
-              </View>
-
-              <Text
-                style={[
-                  styles.helperTop,
-                  { color: theme.colors.textSecondary },
-                ]}
-              >
-                {mode === "edit"
-                  ? "Cambios se aplican al guardar."
-                  : "Se agregará al inicio del menú."}
-              </Text>
+                  <Text style={styles.removeImageText}>Eliminar foto</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            {/* Nombre */}
             <View style={styles.labelRow}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
                 Nombre
@@ -227,13 +250,7 @@ const OwnerAddDish: React.FC = () => {
                 returnKeyType="next"
               />
             </View>
-            {!nameOk ? (
-              <Text style={[styles.error, { color: "#ef4444" }]}>
-                El nombre es obligatorio.
-              </Text>
-            ) : null}
 
-            {/* Precio */}
             <View style={[styles.labelRow, { marginTop: 12 }]}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
                 Precio
@@ -269,16 +286,10 @@ const OwnerAddDish: React.FC = () => {
                 returnKeyType="next"
               />
             </View>
-            {!priceOk && priceText.length > 0 ? (
-              <Text style={[styles.error, { color: "#ef4444" }]}>
-                Escribe un precio válido (mayor a 0).
-              </Text>
-            ) : null}
 
-            {/* Descripción */}
             <View style={[styles.labelRow, { marginTop: 12 }]}>
               <Text style={[styles.label, { color: theme.colors.text }]}>
-                Descripción (opcional)
+                Descripción
               </Text>
               <Text
                 style={[styles.counter, { color: theme.colors.textSecondary }]}
@@ -298,7 +309,7 @@ const OwnerAddDish: React.FC = () => {
               <TextInput
                 value={description}
                 onChangeText={setDescription}
-                placeholder="Ingredientes o nota breve"
+                placeholder="Ingredientes..."
                 placeholderTextColor={theme.colors.textSecondary}
                 style={[styles.textArea, { color: theme.colors.text }]}
                 multiline
@@ -306,24 +317,15 @@ const OwnerAddDish: React.FC = () => {
               />
             </View>
 
-            {/* Disponible */}
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.label, { color: theme.colors.text }]}>
                   Disponible
                 </Text>
-                <Text
-                  style={[styles.hint, { color: theme.colors.textSecondary }]}
-                >
-                  {isAvailable
-                    ? "Se mostrará como disponible"
-                    : "Se mostrará como no disponible"}
-                </Text>
               </View>
               <Switch value={isAvailable} onValueChange={setIsAvailable} />
             </View>
 
-            {/* Guardar */}
             <TouchableOpacity
               style={[
                 styles.saveBtn,
@@ -335,15 +337,18 @@ const OwnerAddDish: React.FC = () => {
               ]}
               onPress={onSave}
               activeOpacity={0.9}
-              disabled={!canSave}
+              disabled={!canSave || isSaving}
             >
               <Ionicons name="save-outline" size={18} color="#fff" />
               <Text style={styles.saveText}>
-                {mode === "edit" ? "Guardar cambios" : "Agregar platillo"}
+                {isSaving
+                  ? "Guardando..."
+                  : mode === "edit"
+                  ? "Guardar cambios"
+                  : "Agregar platillo"}
               </Text>
             </TouchableOpacity>
 
-            {/* Cancelar */}
             <TouchableOpacity
               style={[
                 styles.secondaryBtn,
@@ -372,36 +377,36 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     padding: 14,
   },
-
-  modeRow: {
-    marginBottom: 12,
-    gap: 8,
+  imageSection: {
+    alignItems: "center",
+    marginBottom: 16,
   },
-  modePill: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
+  imagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    justifyContent: "center",
     alignItems: "center",
     gap: 6,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
   },
-  modeText: { fontSize: 12, fontWeight: "900" },
-  helperTop: { fontSize: 11, fontWeight: "600", opacity: 0.9 },
-
+  previewImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 16,
+    resizeMode: "cover",
+  },
+  imageText: { fontSize: 12, fontWeight: "600" },
+  removeImageBtn: { marginTop: 8 },
+  removeImageText: { color: "#EF4444", fontSize: 12, fontWeight: "700" },
   labelRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "baseline",
     marginBottom: 6,
   },
   label: { fontSize: 13, fontWeight: "900" },
   counter: { fontSize: 11, fontWeight: "800", opacity: 0.9 },
-
-  hint: { marginTop: 2, fontSize: 11, fontWeight: "600", opacity: 0.9 },
-  error: { marginTop: 6, fontSize: 11, fontWeight: "800" },
-
   inputWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -412,7 +417,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   input: { flex: 1, fontSize: 14, fontWeight: "700" },
-
   textAreaWrap: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
@@ -425,14 +429,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlignVertical: "top",
   },
-
   switchRow: {
     marginTop: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
   },
-
   saveBtn: {
     marginTop: 16,
     borderRadius: 999,
@@ -443,7 +445,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   saveText: { color: "#fff", fontWeight: "900", fontSize: 14 },
-
   secondaryBtn: {
     marginTop: 10,
     borderRadius: 999,

@@ -6,13 +6,16 @@ import {
   DarkTheme,
 } from "@react-navigation/native";
 import StackNavigator from "./src/navigation/StackNavigator";
+
+// Contextos
 import { ThemeProvider, useTheme } from "./src/theme/ThemeContext";
 import { AuthProvider } from "./src/screens/auth/AuthContext";
 import { LocationProvider } from "./src/context/LocationContext";
-import { RestaurantsProvider } from "./src/context/RestaurantsContext";
-import { RealmProvider } from "./src/database/realm";
-// ✅ IMPORTAR EL SEEDER
-import { RestaurantSeeder } from "./src/database/RestaurantSeeder";
+import { RestaurantsProvider } from "./src/context/RestaurantsContext"; // ✅ El nuevo con Firebase
+
+// ❌ ELIMINAMOS REALM Y EL SEEDER (Ya no se usan)
+// import { RealmProvider } from "./src/database/realm";
+// import { RestaurantSeeder } from "./src/database/RestaurantSeeder";
 
 const AppNavigator: React.FC = () => {
   const { theme } = useTheme();
@@ -37,18 +40,15 @@ const AppNavigator: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <RealmProvider>
-        {/* ✅ AQUÍ SE EJECUTA LA CARGA INICIAL DE DATOS */}
-        <RestaurantSeeder />
-
-        <AuthProvider>
+      {/* ✅ Estructura limpia para Firebase */}
+      {/* AuthProvider debe envolver a RestaurantsProvider para que este pueda leer el usuario actual */}
+      <AuthProvider>
+        <RestaurantsProvider>
           <LocationProvider>
-            <RestaurantsProvider>
-              <AppNavigator />
-            </RestaurantsProvider>
+            <AppNavigator />
           </LocationProvider>
-        </AuthProvider>
-      </RealmProvider>
+        </RestaurantsProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 };

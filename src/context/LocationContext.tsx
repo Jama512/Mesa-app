@@ -1,8 +1,10 @@
+// src/context/LocationContext.tsx
 import React, { createContext, useContext, useMemo, useState } from "react";
 
-type Coords = { latitude: number; longitude: number };
+// ✅ 1. EXPORTAR LOS TIPOS (Esto corrige los errores en los otros archivos)
+export type Coords = { latitude: number; longitude: number };
 
-type LocationState = {
+export type LocationState = {
   coords: Coords | null;
   label: string;
 };
@@ -29,7 +31,8 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({
     setLocationState((prev) => ({
       ...prev,
       ...next,
-      coords: next.coords ?? prev.coords,
+      // Si next.coords viene (incluso si es null), lo usamos. Si es undefined, mantenemos el previo.
+      coords: next.coords !== undefined ? next.coords : prev.coords,
       label: next.label ?? prev.label,
     }));
   };

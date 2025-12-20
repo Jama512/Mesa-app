@@ -243,7 +243,6 @@ const FavoritesScreen: React.FC = () => {
               Desde un restaurante, toca el corazón para guardarlo aquí.
             </Text>
 
-            {/* ✅ mejor: ir al Tab Home */}
             <TouchableOpacity
               onPress={() => navigation.navigate("Home", { screen: "HomeTab" })}
               style={[styles.cta, { backgroundColor: theme.colors.primary }]}

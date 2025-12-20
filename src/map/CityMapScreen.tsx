@@ -10,16 +10,11 @@ import {
   Alert,
   Image,
 } from "react-native";
-import MapView, {
-  Marker,
-  Circle,
-  Region,
-  PROVIDER_GOOGLE,
-} from "react-native-maps";
+// ✅ 1. Importamos UrlTile y quitamos PROVIDER_GOOGLE
+import MapView, { Marker, Circle, Region, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeContext";
-// ✅ 1. CAMBIO IMPORTANTE: Importar Contexto, NO data estática
 import { useRestaurants, Restaurant } from "../context/RestaurantsContext";
 import { useLocationState } from "../context/LocationContext";
 import {
@@ -43,45 +38,6 @@ const DEFAULT_CENTER = {
 const USER_RADIUS_METERS = 2000;
 const INITIAL_DELTA = 0.05;
 
-// Estilos de mapa (Google Maps JSON styles)
-const lightMapStyle = [
-  {
-    featureType: "poi",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.business",
-    elementType: "labels.text",
-    stylers: [{ visibility: "off" }],
-  },
-];
-
-const darkMapStyle = [
-  {
-    elementType: "geometry",
-    stylers: [{ color: "#242f3e" }],
-  },
-  {
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#242f3e" }],
-  },
-  {
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#746855" }],
-  },
-  {
-    featureType: "poi",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.business",
-    elementType: "labels.text",
-    stylers: [{ visibility: "off" }],
-  },
-];
-
 const forkPin = require("../../assets/fork-pin.png");
 
 function buildNiceLabelFromGeocode(geo: Location.LocationGeocodedAddress[]) {
@@ -101,7 +57,6 @@ const CityMapScreen: React.FC = () => {
   const isDark = theme.name === "dark";
   const navigation = useNavigation<MapNavigationProp>();
 
-  // ✅ 2. USAR DATOS REALES DEL CONTEXTO
   const { restaurants } = useRestaurants();
   const { setLocation } = useLocationState();
 
@@ -121,7 +76,6 @@ const CityMapScreen: React.FC = () => {
   const [selectedRestaurant, setSelectedRestaurant] =
     useState<Restaurant | null>(null);
 
-  // ✅ 3. FILTRAR RESTAURANTES CON UBICACIÓN VÁLIDA
   const mapRestaurants = useMemo(() => {
     return restaurants.filter(
       (r) => r.latitude !== undefined && r.longitude !== undefined
@@ -131,35 +85,29 @@ const CityMapScreen: React.FC = () => {
   const askLocation = async () => {
     try {
       setLoading(true);
-
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permiso denegado", "Habilita ubicación para continuar.");
         return;
       }
-
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-
       const current = {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       };
-
       setUserLocation(current);
       setRegion((prev) => ({
         ...prev,
         latitude: current.latitude,
         longitude: current.longitude,
       }));
-
       let label = "Ubicación actual";
       try {
         const geo = await Location.reverseGeocodeAsync(current);
         label = buildNiceLabelFromGeocode(geo);
       } catch {}
-
       setLocation({ coords: current, label });
     } catch (e) {
       console.log(e);
@@ -171,7 +119,6 @@ const CityMapScreen: React.FC = () => {
 
   useEffect(() => {
     askLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const circleCenter = userLocation ?? DEFAULT_CENTER;
@@ -205,15 +152,23 @@ const CityMapScreen: React.FC = () => {
       </View>
 
       <View style={styles.mapContainer}>
+        {/* ✅ MAPA MODO "PLAN B" (OSM) */}
         <MapView
-          provider={PROVIDER_GOOGLE}
           style={StyleSheet.absoluteFill}
           region={region}
           onRegionChangeComplete={setRegion}
-          customMapStyle={isDark ? darkMapStyle : lightMapStyle}
+          // ⚠️ TRUCO: mapType="none" apaga los tiles de Google para que no pida cobro
+          mapType="none"
           showsPointsOfInterest={false}
           onPress={() => setSelectedRestaurant(null)}
         >
+          {/* ✅ CAPA GRATIS DE CARTODB (Basada en OSM, más limpia) */}
+          <UrlTile
+            urlTemplate="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+            maximumZ={19}
+            flipY={false}
+          />
+
           <Circle
             center={circleCenter}
             radius={USER_RADIUS_METERS}
@@ -221,12 +176,11 @@ const CityMapScreen: React.FC = () => {
             fillColor="rgba(255,140,0,0.15)"
           />
 
-          {/* ✅ 4. RENDERIZAR PINES REALES */}
           {mapRestaurants.map((rest) => (
             <Marker
               key={rest.id}
               coordinate={{
-                latitude: rest.latitude!, // ! porque ya filtramos undefined
+                latitude: rest.latitude!,
                 longitude: rest.longitude!,
               }}
               anchor={{ x: 0.5, y: 1 }}
@@ -242,7 +196,6 @@ const CityMapScreen: React.FC = () => {
         </MapView>
       </View>
 
-      {/* FOOTER / CARD FLOTANTE */}
       <View style={[styles.bottom, { backgroundColor: theme.colors.header }]}>
         {selectedRestaurant && (
           <View
@@ -258,7 +211,6 @@ const CityMapScreen: React.FC = () => {
                 { backgroundColor: theme.colors.card },
               ]}
               onPress={() =>
-                // ✅ 5. NAVEGACIÓN CORRECTA CON ID
                 navigation.navigate("CategoryDetail", {
                   restaurantId: selectedRestaurant.id,
                 })

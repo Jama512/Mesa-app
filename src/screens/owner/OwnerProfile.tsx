@@ -11,15 +11,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import OwnerLayout from "./OwnerLayout";
 import { useTheme } from "../../theme/ThemeContext";
-import { useAuth } from "../auth/AuthContext";
 import {
   useRestaurants,
   RestaurantFeatures,
 } from "../../context/RestaurantsContext";
+
+import * as ImagePicker from "expo-image-picker";
+// ✅ 1. IMPORTAR LOCATION PARA TRADUCIR COORDENADAS A TEXTO
+import * as Location from "expo-location";
 
 type FormState = {
   name: string;
@@ -32,14 +36,12 @@ type FormState = {
 
 const OwnerProfile: React.FC = () => {
   const { theme } = useTheme();
-  const { state, updateRestaurant } = useAuth();
   const { restaurants, upsertOwnerRestaurant } = useRestaurants();
 
   const ownerRestaurant = useMemo(() => {
     return restaurants.find((r) => r.isOwnerRestaurant) ?? null;
   }, [restaurants]);
 
-  // ✅ Form local (NO actualizar context en render)
   const [form, setForm] = useState<FormState>({
     name: "",
     address: "",
@@ -49,28 +51,63 @@ const OwnerProfile: React.FC = () => {
     images: [],
   });
 
-  // ✅ evita re-inicializar el form en cada render
   const [hasLoadedInitial, setHasLoadedInitial] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // ✅ Inicializa form UNA VEZ cuando ya tengas data
+  // 1. CARGA INICIAL DE DATOS
   useEffect(() => {
     if (hasLoadedInitial) return;
 
-    const base = state.restaurant;
     const owner = ownerRestaurant;
 
     setForm({
-      name: base?.name ?? owner?.name ?? "Mi restaurante",
-      address: base?.address ?? owner?.address ?? "",
-      phone: base?.phone ?? owner?.phone ?? "",
-      description: base?.description ?? owner?.description ?? "",
-      features: base?.features ?? owner?.features ?? {},
-      images: base?.images ?? owner?.images ?? [],
+      name: owner?.name ?? "Mi restaurante",
+      address: owner?.address ?? "",
+      phone: owner?.phone ?? "",
+      description: owner?.description ?? "",
+      features: owner?.features ?? {},
+      images: owner?.images ?? [],
     });
 
     setHasLoadedInitial(true);
-  }, [hasLoadedInitial, state.restaurant, ownerRestaurant]);
+  }, [hasLoadedInitial, ownerRestaurant]);
+
+  // ✅ 2. EFECTO NUEVO: DETECTAR CAMBIO DE UBICACIÓN Y ACTUALIZAR DIRECCIÓN
+  useEffect(() => {
+    const syncAddressFromLocation = async () => {
+      // Si el restaurante tiene coordenadas...
+      if (ownerRestaurant?.latitude && ownerRestaurant?.longitude) {
+        try {
+          // ...intentamos convertirlas a texto (Calle, Ciudad)
+          const [result] = await Location.reverseGeocodeAsync({
+            latitude: ownerRestaurant.latitude,
+            longitude: ownerRestaurant.longitude,
+          });
+
+          if (result) {
+            // Construimos la dirección bonita
+            const street = result.street || result.name || "";
+            const city = result.city || result.subregion || "";
+            const newAddress = `${street}, ${city}`.trim();
+
+            // Solo actualizamos si la dirección es diferente para no borrar lo que escribas
+            // y para evitar bucles infinitos.
+            setForm((prev) => {
+              // Si el campo de dirección está vacío o es muy distinto, lo llenamos
+              if (prev.address !== newAddress && newAddress.length > 5) {
+                return { ...prev, address: newAddress };
+              }
+              return prev;
+            });
+          }
+        } catch (error) {
+          console.log("No se pudo traducir la ubicación a texto", error);
+        }
+      }
+    };
+
+    syncAddressFromLocation();
+  }, [ownerRestaurant?.latitude, ownerRestaurant?.longitude]); // Se ejecuta cuando cambian las coords
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) => {
@@ -86,11 +123,34 @@ const OwnerProfile: React.FC = () => {
     }));
   }, []);
 
-  // ✅ Dummy: agrega “imagen” (luego conectas ImagePicker + Firebase Storage)
-  const addDummyImage = useCallback(() => {
-    const uri = `https://picsum.photos/seed/${Date.now()}/400/300`;
-    setForm((prev) => ({ ...prev, images: [uri, ...prev.images] }));
-  }, []);
+  const pickImage = async () => {
+    try {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permiso denegado",
+          "Necesitamos acceso a tu galería para subir fotos."
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.7,
+      });
+
+      if (!result.canceled) {
+        const newUri = result.assets[0].uri;
+        setForm((prev) => ({ ...prev, images: [newUri, ...prev.images] }));
+      }
+    } catch (error) {
+      console.log("Error al seleccionar imagen:", error);
+      Alert.alert("Error", "No pudimos abrir la galería.");
+    }
+  };
 
   const removeImage = useCallback((uri: string) => {
     setForm((prev) => ({
@@ -100,22 +160,25 @@ const OwnerProfile: React.FC = () => {
   }, []);
 
   const handleSave = async () => {
-    const payload = {
-      name: form.name.trim() || "Mi restaurante",
-      address: form.address.trim() || undefined,
-      phone: form.phone.trim() || undefined,
-      description: form.description.trim() || undefined,
-      features: form.features,
-      images: form.images,
-    };
-
     setIsSaving(true);
     try {
-      // ✅ 1) AuthContext (dueño)
-      updateRestaurant(payload);
+      // ✅ Si usaste la solución Base64 (GRATIS), importa convertImageToBase64 arriba
+      // Si usaste la solución Storage (PAGO), usa uploadImageToFirebase
+      // Aquí asumo que usas la de Storage o Base64 que implementamos antes.
 
-      upsertOwnerRestaurant(payload);
+      // Ejemplo genérico (ajusta según tu implementación de imágenes):
+      const processedImages = form.images;
 
+      const payload = {
+        name: form.name.trim() || "Mi restaurante",
+        address: form.address.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        description: form.description.trim() || undefined,
+        features: form.features,
+        images: processedImages,
+      };
+
+      await upsertOwnerRestaurant(payload);
       Alert.alert("Guardado", "Tu perfil se actualizó correctamente.");
     } catch {
       Alert.alert("Error", "No se pudo guardar. Intenta de nuevo.");
@@ -231,6 +294,7 @@ const OwnerProfile: React.FC = () => {
             <Text style={[styles.label, { color: theme.colors.text }]}>
               Dirección
             </Text>
+            {/* El input de dirección ahora se llenará solo si seleccionas mapa */}
             <TextInput
               value={form.address}
               onChangeText={(t) => setField("address", t)}
@@ -242,7 +306,7 @@ const OwnerProfile: React.FC = () => {
                   borderColor: theme.colors.border,
                 },
               ]}
-              placeholder="Calle, colonia..."
+              placeholder="Calle, colonia... (o selecciona en Mapa)"
               placeholderTextColor={theme.colors.textSecondary}
             />
 
@@ -352,7 +416,7 @@ const OwnerProfile: React.FC = () => {
               <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
                 Imágenes
               </Text>
-              <TouchableOpacity onPress={addDummyImage} activeOpacity={0.85}>
+              <TouchableOpacity onPress={pickImage} activeOpacity={0.85}>
                 <Text
                   style={[styles.sectionCta, { color: theme.colors.primary }]}
                 >
@@ -377,14 +441,7 @@ const OwnerProfile: React.FC = () => {
                     ]}
                   >
                     <View style={styles.imageLeft}>
-                      <View
-                        style={[
-                          styles.thumb,
-                          { backgroundColor: theme.colors.primary },
-                        ]}
-                      >
-                        <Ionicons name="image-outline" size={18} color="#fff" />
-                      </View>
+                      <Image source={{ uri: item }} style={styles.thumb} />
                       <Text
                         style={[
                           styles.imageText,
@@ -392,7 +449,7 @@ const OwnerProfile: React.FC = () => {
                         ]}
                         numberOfLines={1}
                       >
-                        {item}
+                        Foto cargada
                       </Text>
                     </View>
 
@@ -507,9 +564,9 @@ const styles = StyleSheet.create({
   thumb: {
     width: 34,
     height: 34,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
+    borderRadius: 8,
+    resizeMode: "cover",
+    backgroundColor: "#ccc",
   },
   imageText: { flex: 1, fontSize: 11, fontWeight: "700" },
   emptyImages: { marginTop: 6, fontSize: 12, fontWeight: "700", opacity: 0.85 },

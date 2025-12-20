@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert, // ✅ Importar Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
@@ -37,6 +38,8 @@ const LoginScreen: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
   const navigation = useNavigation<LoginNav>();
+
+  // ✅ Usamos el hook de Auth
   const { loginAsOwner } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -61,17 +64,30 @@ const LoginScreen: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!validate()) return;
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      // ✅ SOLO setea el rol/estado. NO hacemos reset/navigate a OwnerDashboard.
-      // El StackNavigator debe cambiar solo al stack de owner cuando isOwner=true.
-      loginAsOwner({ email, restaurantName: "Restaurante no configurado" });
+    try {
+      // Simulamos una pequeña espera para UX
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
+      // ✅ Login Real: Verificamos credenciales contra la "DB Local"
+      const success = await loginAsOwner({ email, password });
+
+      if (!success) {
+        // Si falló (contraseña incorrecta o usuario no existe), paramos loading
+        setIsSubmitting(false);
+        // El alert ya lo muestra el AuthContext, pero podemos poner uno genérico aquí si queremos
+      }
+      // Si éxito, el AuthContext actualiza el estado global y
+      // el StackNavigator nos mueve al Dashboard automáticamente.
+      // NO llamar navigation.navigate aquí para evitar condiciones de carrera.
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Ocurrió un problema inesperado.");
       setIsSubmitting(false);
-    }, 500);
+    }
   };
 
   const goToSignUp = () => navigation.navigate("SignUp");

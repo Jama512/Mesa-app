@@ -1,11 +1,13 @@
 // src/screens/owner/OwnerDashboard.tsx
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
+  Alert,
+  ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
@@ -18,11 +20,10 @@ import { useRestaurants } from "../../context/RestaurantsContext";
 
 type Nav = StackNavigationProp<RootStackParamList, "OwnerDashboard">;
 
-const DEFAULT_HOURS_LABEL = "Hoy · 9:00 AM – 10:00 PM"; // placeholder (luego lo haces real con Realm)
-
 const OwnerDashboard: React.FC = () => {
   const { theme } = useTheme();
-  const { logout } = useAuth();
+  // ✅ 1. TRAEMOS 'state' PARA TENER EL ID DEL USUARIO
+  const { state, logout } = useAuth();
   const navigation = useNavigation<Nav>();
 
   const {
@@ -33,15 +34,16 @@ const OwnerDashboard: React.FC = () => {
     upsertOwnerRestaurant,
   } = useRestaurants();
 
-  const ownerRestaurant = useMemo(
-    () => restaurants.find((r) => r.isOwnerRestaurant) ?? null,
-    [restaurants]
-  );
+  // ✅ 2. BÚSQUEDA ROBUSTA (Por ID de usuario, no por booleano)
+  const ownerRestaurant = useMemo(() => {
+    if (!state.userId) return null;
+    return restaurants.find((r) => r.ownerId === state.userId) ?? null;
+  }, [restaurants, state.userId]);
 
   const ownerName = ownerRestaurant?.name ?? "Mi restaurante";
   const ownerRating = ownerRestaurant?.rating ?? 4.8;
 
-  // Estado del negocio (lo vamos a manejar con .status)
+  // Estado del restaurante
   const statusRaw = ownerRestaurant?.status ?? "Abierto ahora";
   const isOpen = /abierto/i.test(statusRaw);
 
@@ -62,7 +64,6 @@ const OwnerDashboard: React.FC = () => {
     ? favorites.includes(ownerRestaurant.id)
     : false;
 
-  // ✅ Helper tipado (sin "params as any")
   const goTo = <T extends keyof RootStackParamList>(
     ...args: undefined extends RootStackParamList[T]
       ? [screen: T] | [screen: T, params: RootStackParamList[T]]
@@ -71,9 +72,15 @@ const OwnerDashboard: React.FC = () => {
     navigation.navigate(...(args as [any, any]));
   };
 
+  const goHome = () => {
+    navigation.navigate("Home" as any);
+  };
+
   const handleLogout = () => {
-    // ✅ No RESET: tu StackNavigator cambia solo cuando logout() cambia el estado
-    logout();
+    Alert.alert("Cerrar sesión", "¿Estás seguro de que quieres salir?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Salir", style: "destructive", onPress: () => logout() },
+    ]);
   };
 
   const toggleFavOwner = () => {
@@ -81,11 +88,20 @@ const OwnerDashboard: React.FC = () => {
     toggleFavorite(ownerRestaurant.id);
   };
 
-  const toggleOpenClosed = () => {
-    // ✅ Persiste en RestaurantsContext (luego lo harás real en Realm)
-    upsertOwnerRestaurant({
-      status: isOpen ? "Cerrado" : "Abierto ahora",
-    });
+  // ✅ 3. TOGGLE CON LOGS PARA DEPURAR
+  const toggleOpenClosed = async () => {
+    const newStatus = isOpen ? "Cerrado" : "Abierto ahora";
+    console.log("Cambiando estado a:", newStatus);
+
+    try {
+      await upsertOwnerRestaurant({
+        status: newStatus,
+      });
+      // El cambio se reflejará automáticamente gracias a onSnapshot
+    } catch (e) {
+      console.error("Error cambiando estado:", e);
+      Alert.alert("Error", "No se pudo actualizar el estado.");
+    }
   };
 
   const lastEvents = ownerEvents.slice(0, 3);
@@ -96,313 +112,339 @@ const OwnerDashboard: React.FC = () => {
       subtitle="Administra tu perfil, menú y anuncios."
       showBack={false}
     >
-      {/* HERO */}
-      <View
-        style={[
-          styles.hero,
-          {
-            backgroundColor: theme.colors.card,
-            borderColor: theme.colors.border,
-          },
-        ]}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroTop}>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={[styles.heroTitle, { color: theme.colors.text }]}
-              numberOfLines={1}
-            >
-              {ownerName}
-            </Text>
-
-            <View style={styles.heroMetaRow}>
-              <Ionicons name="star" size={14} color={theme.colors.primary} />
+        {/* HERO */}
+        <View
+          style={[
+            styles.hero,
+            {
+              backgroundColor: theme.colors.card,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <View style={styles.heroTop}>
+            <View style={{ flex: 1 }}>
               <Text
-                style={[styles.heroMeta, { color: theme.colors.textSecondary }]}
+                style={[styles.heroTitle, { color: theme.colors.text }]}
                 numberOfLines={1}
               >
-                {ownerRating.toFixed(1)}
+                {ownerName}
               </Text>
-            </View>
 
-            {/* Estado + horario */}
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusPill,
-                  {
-                    backgroundColor: theme.colors.background,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.dot,
-                    { backgroundColor: isOpen ? "#22C55E" : "#EF4444" },
-                  ]}
-                />
+              <View style={styles.heroMetaRow}>
+                <Ionicons name="star" size={14} color={theme.colors.primary} />
                 <Text
                   style={[
-                    styles.statusText,
+                    styles.heroMeta,
                     { color: theme.colors.textSecondary },
                   ]}
+                  numberOfLines={1}
                 >
-                  {isOpen ? "Abierto" : "Cerrado"}
+                  {ownerRating.toFixed(1)}
                 </Text>
               </View>
 
-              <Text
-                style={[
-                  styles.hoursText,
-                  { color: theme.colors.textSecondary },
-                ]}
-                numberOfLines={1}
-              >
-                {DEFAULT_HOURS_LABEL}
-              </Text>
+              <View style={styles.statusRow}>
+                <View
+                  style={[
+                    styles.statusPill,
+                    {
+                      backgroundColor: theme.colors.background,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.dot,
+                      { backgroundColor: isOpen ? "#22C55E" : "#EF4444" },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.statusText,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                  >
+                    {isOpen ? "Abierto" : "Cerrado"}
+                  </Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.hoursText,
+                    {
+                      color: isOpen
+                        ? theme.colors.text
+                        : theme.colors.textSecondary,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {isOpen ? "Disponible para clientes" : "No disponible"}
+                </Text>
+              </View>
+
+              <View style={styles.heroBadgesRow}>
+                <Badge
+                  icon={hasLocation ? "location" : "location-outline"}
+                  label={hasLocation ? "Ubicación OK" : "Sin ubicación"}
+                  active={hasLocation}
+                  theme={theme}
+                />
+                <Badge
+                  icon="options-outline"
+                  label={`${servicesEnabledCount} servicios`}
+                  active={false}
+                  theme={theme}
+                />
+                <Badge
+                  icon="images-outline"
+                  label={`${ownerImagesCount} fotos`}
+                  active={false}
+                  theme={theme}
+                />
+              </View>
             </View>
 
-            {/* Badges */}
-            <View style={styles.heroBadgesRow}>
-              <Badge
-                icon={hasLocation ? "location" : "location-outline"}
-                label={hasLocation ? "Ubicación OK" : "Sin ubicación"}
-                active={hasLocation}
-                theme={theme}
+            <TouchableOpacity
+              onPress={toggleFavOwner}
+              style={[
+                styles.favBtn,
+                {
+                  backgroundColor: theme.colors.background,
+                  borderColor: theme.colors.border,
+                },
+              ]}
+              activeOpacity={0.9}
+            >
+              <Ionicons
+                name={isFavorite ? "heart" : "heart-outline"}
+                size={18}
+                color={
+                  isFavorite ? theme.colors.primary : theme.colors.textSecondary
+                }
               />
-              <Badge
-                icon="options-outline"
-                label={`${servicesEnabledCount} servicios`}
-                active={false}
-                theme={theme}
-              />
-              <Badge
-                icon="images-outline"
-                label={`${ownerImagesCount} fotos`}
-                active={false}
-                theme={theme}
-              />
-            </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.kpiRow}>
+            <KpiCard
+              label="Anuncios"
+              value={`${ownerEventsCount}`}
+              theme={theme}
+            />
+            <KpiCard
+              label="Favoritos"
+              value={`${favorites.length}`}
+              theme={theme}
+            />
+            <KpiCard
+              label="Estado"
+              value={isOpen ? "ON" : "OFF"}
+              theme={theme}
+            />
+          </View>
+
+          <View style={styles.quickRow}>
+            <QuickBtn
+              label="Publicar"
+              icon="megaphone-outline"
+              onPress={() => goTo("OwnerCreateAnnouncement")}
+              theme={theme}
+            />
+            <QuickBtn
+              label="Perfil"
+              icon="person-outline"
+              onPress={() => goTo("OwnerProfile")}
+              theme={theme}
+            />
+            <QuickBtn
+              label="Mapa"
+              icon="map-outline"
+              onPress={() => goTo("OwnerLocationPicker")}
+              theme={theme}
+            />
           </View>
 
           <TouchableOpacity
-            onPress={toggleFavOwner}
             style={[
-              styles.favBtn,
+              styles.openCloseBtn,
               {
                 backgroundColor: theme.colors.background,
                 borderColor: theme.colors.border,
               },
             ]}
+            onPress={toggleOpenClosed}
             activeOpacity={0.9}
           >
             <Ionicons
-              name={isFavorite ? "heart" : "heart-outline"}
+              name={isOpen ? "lock-open-outline" : "lock-closed-outline"}
               size={18}
-              color={
-                isFavorite ? theme.colors.primary : theme.colors.textSecondary
-              }
+              color={theme.colors.primary}
             />
+            <Text style={[styles.openCloseText, { color: theme.colors.text }]}>
+              {isOpen ? "Marcar como cerrado" : "Marcar como abierto"}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* KPIs */}
-        <View style={styles.kpiRow}>
-          <KpiCard
-            label="Anuncios"
-            value={`${ownerEventsCount}`}
-            theme={theme}
-          />
-          <KpiCard
-            label="Favoritos"
-            value={`${favorites.length}`}
-            theme={theme}
-          />
-          <KpiCard label="Estado" value={isOpen ? "ON" : "OFF"} theme={theme} />
-        </View>
-
-        {/* Quick actions */}
-        <View style={styles.quickRow}>
-          <QuickBtn
-            label="Publicar"
+        {/* ACCESOS */}
+        <View style={styles.grid}>
+          <DashCard
+            title="Publicar anuncio"
+            subtitle="Evento o promoción"
             icon="megaphone-outline"
             onPress={() => goTo("OwnerCreateAnnouncement")}
             theme={theme}
           />
-          <QuickBtn
-            label="Perfil"
+          <DashCard
+            title="Editar menú"
+            subtitle="Platillos y precios"
+            icon="restaurant-outline"
+            onPress={() => goTo("OwnerMenuList")}
+            theme={theme}
+          />
+          <DashCard
+            title="Mi perfil"
+            subtitle="Datos, fotos y servicios"
             icon="person-outline"
             onPress={() => goTo("OwnerProfile")}
             theme={theme}
           />
-          <QuickBtn
-            label="Mapa"
-            icon="map-outline"
-            onPress={() => goTo("OwnerLocationPicker")}
+          <DashCard
+            title="Estadísticas"
+            subtitle="Visitas y rendimiento"
+            icon="stats-chart-outline"
+            onPress={() => goTo("OwnerStats")}
             theme={theme}
           />
         </View>
 
-        {/* Toggle abierto/cerrado */}
+        {/* ÚLTIMOS ANUNCIOS */}
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            Últimos anuncios
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => goTo("OwnerCreateAnnouncement")}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.sectionCta, { color: theme.colors.primary }]}>
+              Crear
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {lastEvents.length > 0 ? (
+          <View style={{ gap: 10 }}>
+            {lastEvents.map((item) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.eventRow,
+                  {
+                    backgroundColor: theme.colors.card,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[styles.eventTitle, { color: theme.colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {item.title}
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.eventMeta,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {item.dateLabel}
+                    {item.description ? ` • ${item.description}` : ""}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => removeOwnerEvent(item.id)}
+                  style={[
+                    styles.trashBtn,
+                    { borderColor: theme.colors.border },
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={18}
+                    color={theme.colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyBox}>
+            <Ionicons
+              name="megaphone-outline"
+              size={22}
+              color={theme.colors.textSecondary}
+            />
+            <Text
+              style={[styles.emptyText, { color: theme.colors.textSecondary }]}
+            >
+              Aún no has publicado anuncios.
+            </Text>
+          </View>
+        )}
+
+        {/* BOTÓN: VER COMO CLIENTE */}
         <TouchableOpacity
           style={[
-            styles.openCloseBtn,
+            styles.viewAsGuestBtn,
             {
-              backgroundColor: theme.colors.background,
+              backgroundColor: theme.colors.card,
               borderColor: theme.colors.border,
             },
           ]}
-          onPress={toggleOpenClosed}
+          onPress={goHome}
           activeOpacity={0.9}
         >
-          <Ionicons
-            name={isOpen ? "lock-open-outline" : "lock-closed-outline"}
-            size={18}
-            color={theme.colors.primary}
-          />
-          <Text style={[styles.openCloseText, { color: theme.colors.text }]}>
-            {isOpen ? "Marcar como cerrado" : "Marcar como abierto"}
+          <Ionicons name="eye-outline" size={18} color={theme.colors.primary} />
+          <Text style={[styles.viewAsGuestText, { color: theme.colors.text }]}>
+            Ver como cliente (Ir al Home)
           </Text>
         </TouchableOpacity>
-      </View>
 
-      {/* ACCESOS */}
-      <View style={styles.grid}>
-        <DashCard
-          title="Publicar anuncio"
-          subtitle="Evento o promoción"
-          icon="megaphone-outline"
-          onPress={() => goTo("OwnerCreateAnnouncement")}
-          theme={theme}
-        />
-        <DashCard
-          title="Editar menú"
-          subtitle="Platillos y precios"
-          icon="restaurant-outline"
-          onPress={() => goTo("OwnerMenuList")}
-          theme={theme}
-        />
-        <DashCard
-          title="Mi perfil"
-          subtitle="Datos, fotos y servicios"
-          icon="person-outline"
-          onPress={() => goTo("OwnerProfile")}
-          theme={theme}
-        />
-        <DashCard
-          title="Estadísticas"
-          subtitle="Visitas y rendimiento"
-          icon="stats-chart-outline"
-          onPress={() => goTo("OwnerStats")}
-          theme={theme}
-        />
-      </View>
-
-      {/* ÚLTIMOS ANUNCIOS */}
-      <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-          Últimos anuncios
-        </Text>
-
+        {/* LOGOUT */}
         <TouchableOpacity
-          onPress={() => goTo("OwnerCreateAnnouncement")}
-          activeOpacity={0.8}
+          style={[
+            styles.logoutButton,
+            { backgroundColor: theme.colors.primary },
+          ]}
+          onPress={handleLogout}
+          activeOpacity={0.9}
         >
-          <Text style={[styles.sectionCta, { color: theme.colors.primary }]}>
-            Crear
-          </Text>
+          <Ionicons name="log-out-outline" size={18} color="#fff" />
+          <Text style={styles.logoutText}>Cerrar sesión</Text>
         </TouchableOpacity>
-      </View>
 
-      {lastEvents.length > 0 ? (
-        <FlatList
-          data={lastEvents}
-          keyExtractor={(it) => it.id}
-          scrollEnabled={false}
-          renderItem={({ item }) => (
-            <View
-              style={[
-                styles.eventRow,
-                {
-                  backgroundColor: theme.colors.card,
-                  borderColor: theme.colors.border,
-                },
-              ]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[styles.eventTitle, { color: theme.colors.text }]}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.eventMeta,
-                    { color: theme.colors.textSecondary },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {item.dateLabel}
-                  {item.description ? ` • ${item.description}` : ""}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                onPress={() => removeOwnerEvent(item.id)}
-                style={[styles.trashBtn, { borderColor: theme.colors.border }]}
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="trash-outline"
-                  size={18}
-                  color={theme.colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-          )}
-        />
-      ) : (
-        <View style={styles.emptyBox}>
-          <Ionicons
-            name="megaphone-outline"
-            size={22}
-            color={theme.colors.textSecondary}
-          />
-          <Text
-            style={[styles.emptyText, { color: theme.colors.textSecondary }]}
-          >
-            Aún no has publicado anuncios.
-          </Text>
-        </View>
-      )}
-
-      {/* LOGOUT */}
-      <TouchableOpacity
-        style={[styles.logoutButton, { backgroundColor: theme.colors.primary }]}
-        onPress={handleLogout}
-        activeOpacity={0.9}
-      >
-        <Ionicons name="log-out-outline" size={18} color="#fff" />
-        <Text style={styles.logoutText}>Cerrar sesión</Text>
-      </TouchableOpacity>
+        <View style={{ height: 40 }} />
+      </ScrollView>
     </OwnerLayout>
   );
 };
 
-function Badge({
-  icon,
-  label,
-  active,
-  theme,
-}: {
-  icon: any;
-  label: string;
-  active: boolean;
-  theme: any;
-}) {
+// ... (El resto de componentes auxiliares y estilos se mantienen IGUAL)
+function Badge({ icon, label, active, theme }: any) {
   return (
     <View
       style={[
@@ -430,15 +472,7 @@ function Badge({
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  theme,
-}: {
-  label: string;
-  value: string;
-  theme: any;
-}) {
+function KpiCard({ label, value, theme }: any) {
   return (
     <View
       style={[
@@ -459,17 +493,7 @@ function KpiCard({
   );
 }
 
-function QuickBtn({
-  label,
-  icon,
-  onPress,
-  theme,
-}: {
-  label: string;
-  icon: any;
-  onPress: () => void;
-  theme: any;
-}) {
+function QuickBtn({ label, icon, onPress, theme }: any) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -490,19 +514,7 @@ function QuickBtn({
   );
 }
 
-function DashCard({
-  title,
-  subtitle,
-  icon,
-  onPress,
-  theme,
-}: {
-  title: string;
-  subtitle: string;
-  icon: any;
-  onPress: () => void;
-  theme: any;
-}) {
+function DashCard({ title, subtitle, icon, onPress, theme }: any) {
   return (
     <TouchableOpacity
       style={[
@@ -544,6 +556,7 @@ function DashCard({
 }
 
 const styles = StyleSheet.create({
+  scrollContent: { paddingBottom: 20 },
   hero: {
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
@@ -559,7 +572,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   heroMeta: { fontSize: 12, fontWeight: "700", opacity: 0.9 },
-
   statusRow: { marginTop: 10, gap: 8 },
   statusPill: {
     alignSelf: "flex-start",
@@ -574,7 +586,6 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 999 },
   statusText: { fontSize: 11, fontWeight: "900" },
   hoursText: { fontSize: 11, fontWeight: "700", opacity: 0.9 },
-
   heroBadgesRow: {
     marginTop: 10,
     flexDirection: "row",
@@ -591,7 +602,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   badgeText: { fontSize: 11, fontWeight: "800" },
-
   favBtn: {
     width: 40,
     height: 40,
@@ -600,7 +610,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   kpiRow: { marginTop: 12, flexDirection: "row", gap: 10 },
   kpiCard: {
     flex: 1,
@@ -612,7 +621,6 @@ const styles = StyleSheet.create({
   },
   kpiValue: { fontSize: 16, fontWeight: "900" },
   kpiLabel: { marginTop: 2, fontSize: 11, fontWeight: "700", opacity: 0.9 },
-
   quickRow: { marginTop: 12, flexDirection: "row", gap: 10 },
   quickBtn: {
     flex: 1,
@@ -624,7 +632,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   quickText: { fontSize: 11, fontWeight: "900" },
-
   openCloseBtn: {
     marginTop: 12,
     borderRadius: 14,
@@ -637,7 +644,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   openCloseText: { fontSize: 12, fontWeight: "900" },
-
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -663,7 +669,6 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 14, fontWeight: "900", marginBottom: 4 },
   cardSubtitle: { fontSize: 11, lineHeight: 15, opacity: 0.9 },
-
   sectionHeader: {
     marginTop: 18,
     marginBottom: 10,
@@ -673,7 +678,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 14, fontWeight: "900" },
   sectionCta: { fontSize: 12, fontWeight: "900" },
-
   eventRow: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
@@ -694,7 +698,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   emptyBox: {
     alignItems: "center",
     justifyContent: "center",
@@ -702,9 +705,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyText: { fontSize: 12, fontWeight: "700", textAlign: "center" },
-
+  viewAsGuestBtn: {
+    marginTop: 20,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  viewAsGuestText: { fontWeight: "800", fontSize: 13 },
   logoutButton: {
-    marginTop: 18,
+    marginTop: 12,
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: "center",

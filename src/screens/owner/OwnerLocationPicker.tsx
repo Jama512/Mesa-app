@@ -1,3 +1,4 @@
+// src/screens/owner/OwnerLocationPicker.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -10,17 +11,18 @@ import {
 } from "react-native";
 import { useTheme } from "../../theme/ThemeContext";
 import OwnerLayout from "./OwnerLayout";
+// ✅ 1. Importamos UrlTile y quitamos PROVIDER_GOOGLE
 import MapView, {
   Marker,
   Region,
   MapPressEvent,
-  PROVIDER_GOOGLE,
+  UrlTile,
 } from "react-native-maps";
 import * as Location from "expo-location";
 import { useAuth } from "../auth/AuthContext";
+import { useRestaurants } from "../../context/RestaurantsContext";
 import { Ionicons } from "@expo/vector-icons";
 
-// Si quieres el pin de tenedor aquí también (opcional)
 const forkPin = require("../../../assets/fork-pin.png");
 
 // Centro fallback (Zamora)
@@ -31,27 +33,16 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.02,
 };
 
-// Ocultar POIs para que se vean “limpios” tus pines
-const mapStyle = [
-  {
-    featureType: "poi",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.business",
-    elementType: "labels.text",
-    stylers: [{ visibility: "off" }],
-  },
-];
-
 const OwnerLocationPicker: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme.name === "dark";
-  const { state, updateRestaurant } = useAuth();
 
-  const savedLat = state.restaurant?.latitude;
-  const savedLng = state.restaurant?.longitude;
+  const { state, updateRestaurant } = useAuth();
+  const { upsertOwnerRestaurant } = useRestaurants();
+
+  // Forzamos el tipo 'any' para evitar errores de TS
+  const savedLat = (state.restaurant as any)?.latitude;
+  const savedLng = (state.restaurant as any)?.longitude;
 
   const initialRegion = useMemo<Region>(() => {
     if (typeof savedLat === "number" && typeof savedLng === "number") {
@@ -79,7 +70,6 @@ const OwnerLocationPicker: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Al montar: si no hay coords guardadas, intenta ubicar al dueño
   useEffect(() => {
     if (selectedLocation) return;
     handleUseCurrentLocation();
@@ -146,14 +136,14 @@ const OwnerLocationPicker: React.FC = () => {
       setSaving(true);
       setSaved(false);
 
-      // ✅ Guardar en AuthContext
-      updateRestaurant({
+      const newCoords = {
         latitude: selectedLocation.latitude,
         longitude: selectedLocation.longitude,
-      });
+      };
 
-      // 🔜 Luego aquí conectas Realm:
-      // realm.write(() => { restaurant.latitude = ...; restaurant.longitude = ... })
+      // Guardar en ambos contextos
+      updateRestaurant(newCoords as any);
+      upsertOwnerRestaurant(newCoords);
 
       setSaved(true);
       Alert.alert("Listo", "Ubicación guardada correctamente.");
@@ -172,20 +162,25 @@ const OwnerLocationPicker: React.FC = () => {
       showBack
     >
       <View style={styles.container}>
-        {/* MAPA */}
         <View style={[styles.mapWrap, { borderColor: theme.colors.border }]}>
+          {/* ✅ 2. MAPA CONFIGURADO SIN GOOGLE (mapType="none") */}
           <MapView
-            provider={PROVIDER_GOOGLE}
             style={StyleSheet.absoluteFill}
             region={region}
             onRegionChangeComplete={setRegion}
             onPress={handleMapPress}
-            customMapStyle={mapStyle}
             showsPointsOfInterest={false}
+            mapType="none" // 🛑 Apagamos Google Maps Base
           >
+            {/* ✅ 3. URL DE CARTO DB (Gratis, bonito y sin bloqueos) */}
+            <UrlTile
+              urlTemplate="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+              maximumZ={19}
+              flipY={false}
+            />
+
             {selectedLocation && (
               <Marker coordinate={selectedLocation} title="Mi restaurante">
-                {/* Si NO quieres icono custom, borra este children y deja Marker normal */}
                 <Image source={forkPin} style={styles.pinImg} />
               </Marker>
             )}
@@ -238,7 +233,7 @@ const OwnerLocationPicker: React.FC = () => {
           </View>
         </View>
 
-        {/* BOTONES PRINCIPALES */}
+        {/* BOTONES ACCIÓN */}
         <View style={styles.actionsRow}>
           <TouchableOpacity
             style={[
@@ -289,7 +284,7 @@ const OwnerLocationPicker: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* INFO */}
+        {/* INFO CARD */}
         <View
           style={[
             styles.infoCard,
@@ -317,8 +312,7 @@ const OwnerLocationPicker: React.FC = () => {
           <Text
             style={[styles.infoHint, { color: theme.colors.textSecondary }]}
           >
-            Esta coordenada se usará para mostrar tu pin a los usuarios y
-            calcular restaurantes cercanos.
+            Esta coordenada se usará para mostrar tu pin a los usuarios.
           </Text>
 
           {saved && (
@@ -334,7 +328,6 @@ const OwnerLocationPicker: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-
   mapWrap: {
     height: 280,
     borderRadius: 18,
@@ -342,19 +335,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 14,
   },
-
-  pinImg: {
-    width: 34,
-    height: 34,
-    resizeMode: "contain",
-  },
-
-  fabColumn: {
-    position: "absolute",
-    right: 10,
-    top: 10,
-    gap: 10,
-  },
+  pinImg: { width: 34, height: 34, resizeMode: "contain" },
+  fabColumn: { position: "absolute", right: 10, top: 10, gap: 10 },
   fab: {
     width: 40,
     height: 40,
@@ -363,7 +345,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth,
   },
-
   actionsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -379,7 +360,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   secondaryButtonText: { fontSize: 12, fontWeight: "700" },
-
   primaryButton: {
     flex: 1,
     borderRadius: 999,
@@ -388,7 +368,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryButtonText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-
   infoCard: {
     borderRadius: 14,
     paddingHorizontal: 14,

@@ -2,15 +2,23 @@
 import React, {
   createContext,
   useContext,
-  useMemo,
   useState,
+  useEffect,
   useCallback,
+  useMemo,
 } from "react";
-import Realm from "realm";
-import { useQuery, useRealm } from "../database/realm";
-import { Restaurant as RestaurantModel } from "../database/models/RestaurantModel";
-import { Event as EventModel } from "../database/models/EventModel";
-import { useAuth } from "../screens/auth/AuthContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+// ✅ Importamos Firebase
+import {
+  collection,
+  onSnapshot,
+  doc,
+  setDoc,
+  updateDoc,
+  arrayUnion,
+  getDoc,
+} from "firebase/firestore";
+import { db, auth } from "../config/firebaseConfig";
 
 /* =======================
    TIPOS (Compatibilidad UI)
@@ -31,6 +39,16 @@ export type RestaurantFeatures = {
   cardPayment?: boolean;
 };
 
+// ✅ Agregamos Dish para el menú
+export type Dish = {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  image?: string;
+  isAvailable?: boolean;
+};
+
 export type Restaurant = {
   id: string;
   name: string;
@@ -45,193 +63,194 @@ export type Restaurant = {
   features?: RestaurantFeatures;
   images?: string[];
   events?: RestaurantEvent[];
+  menu?: Dish[]; // ✅ Agregado soporte para menú
   isOwnerRestaurant?: boolean;
+  ownerId?: string; // ID de Firebase Auth
 };
 
 type Ctx = {
   restaurants: Restaurant[];
   favorites: string[];
   toggleFavorite: (id: string) => void;
-  upsertOwnerRestaurant: (patch: Partial<Restaurant>) => void;
+  upsertOwnerRestaurant: (patch: Partial<Restaurant>) => Promise<void>;
   addOwnerEvent: (event: Omit<RestaurantEvent, "id">) => void;
   removeOwnerEvent: (eventId: string) => void;
+  // Funciones para menú
+  addDish?: (dish: Dish) => Promise<void>;
+  removeDish?: (dishId: string) => Promise<void>;
 };
 
 const RestaurantsContext = createContext<Ctx | undefined>(undefined);
-const OWNER_ID = "owner-restaurant"; // ID fijo para el usuario local
 
 export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const realm = useRealm();
-  const { state } = useAuth();
-
-  // 1. LEER DE REALM
-  const realmRestaurants = useQuery(RestaurantModel);
-  const realmEvents = useQuery(EventModel);
-
-  // 2. FAVORITOS (Estado Local)
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
 
-  const toggleFavorite = useCallback((id: string) => {
-    setFavorites((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+  // 1. LEER DE FIREBASE (Tiempo Real 📡)
+  useEffect(() => {
+    // Suscribirse a la colección "restaurants"
+    const unsubscribe = onSnapshot(
+      collection(db, "restaurants"),
+      (snapshot) => {
+        const list: Restaurant[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const currentUser = auth.currentUser;
+
+          // Verificar si es mío
+          const isOwner = currentUser && data.ownerId === currentUser.uid;
+
+          return {
+            id: docSnap.id,
+            name: data.name || "Restaurante sin nombre",
+            category: data.category || "General",
+            latitude: data.latitude,
+            longitude: data.longitude,
+            address: data.address,
+            phone: data.phone,
+            description: data.description,
+            rating: data.rating ?? 4.5,
+            status: data.status ?? "Abierto ahora",
+            features: data.features || {},
+            images: data.images || [],
+            events: data.events || [], // Los eventos ahora viven dentro del doc
+            menu: data.menu || [],
+            isOwnerRestaurant: !!isOwner,
+            ownerId: data.ownerId,
+          };
+        });
+        setRestaurants(list);
+      }
     );
+
+    // Cargar favoritos locales
+    AsyncStorage.getItem("MESA_FAVORITES").then((res) => {
+      if (res) setFavorites(JSON.parse(res));
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // 3. ADAPTADOR: REALM -> UI
-  const visibleRestaurants: Restaurant[] = useMemo(() => {
-    return realmRestaurants.map((r) => {
-      const features: RestaurantFeatures = {
-        wifi: r.wifi,
-        outdoorSeating: r.outdoorSeating,
-        parking: r.parking,
-        reservations: r.reservations,
-        delivery: r.delivery,
-        cardPayment: r.cardPayment,
-      };
-
-      const myEvents = realmEvents
-        .filter((e) => e.restaurantId === r._id)
-        .map((e) => ({
-          id: e._id.toHexString(),
-          title: e.title,
-          dateLabel: e.dateLabel,
-          description: e.description ?? undefined,
-        }));
-
-      return {
-        id: r._id,
-        name: r.name,
-        category: r.category,
-        latitude: r.latitude ?? undefined,
-        longitude: r.longitude ?? undefined,
-        address: r.address ?? undefined,
-        phone: r.phone ?? undefined,
-        description: r.description ?? undefined,
-        rating: r.rating ?? 4.5,
-        status: r.status ?? "Abierto ahora",
-        features,
-        images: Array.from(r.images),
-        events: myEvents,
-        isOwnerRestaurant: r.isOwnerRestaurant,
-      };
+  // 2. FAVORITOS (Local) ❤️
+  const toggleFavorite = useCallback((id: string) => {
+    setFavorites((prev) => {
+      const newFavs = prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id];
+      AsyncStorage.setItem("MESA_FAVORITES", JSON.stringify(newFavs));
+      return newFavs;
     });
-  }, [realmRestaurants, realmEvents]);
+  }, []);
 
-  // 4. ACCIONES DEL DUEÑO (Escribir en Realm)
+  // 3. ACCIONES DEL DUEÑO (Escribir en Firestore 🔥)
   const upsertOwnerRestaurant = useCallback(
-    (patch: Partial<Restaurant>) => {
-      realm.write(() => {
-        // ✅ TIPADO EXPLÍCITO: Evita que TS se confunda entre Realm.Object y null
-        let existing: RestaurantModel | null = realm.objectForPrimaryKey(
-          RestaurantModel,
-          OWNER_ID
-        );
+    async (patch: Partial<Restaurant>) => {
+      const user = auth.currentUser;
+      if (!user) return;
 
-        if (!existing) {
-          // Crear usando la Clase (más seguro)
-          existing = realm.create(
-            RestaurantModel,
-            {
-              _id: OWNER_ID,
-              name: patch.name || "Mi Restaurante",
-              category: "Mi Negocio",
-              isOwnerRestaurant: true,
-              images: [],
-              createdAt: new Date(),
-            },
-            Realm.UpdateMode.Modified
-          );
-        }
+      // Usamos el UID del usuario como ID del documento para asegurar 1 restaurante por dueño
+      const docRef = doc(db, "restaurants", user.uid);
 
-        // ✅ VARIABLE SEGURA: Confirmamos a TS que ya no es null
-        const myRest = existing!;
+      // 🛡️ LIMPIEZA DE DATOS: Firestore odia 'undefined'
+      const payload: any = {
+        ...patch,
+        ownerId: user.uid,
+      };
 
-        // Actualizar campos planos
-        if (patch.name !== undefined) myRest.name = patch.name;
-        if (patch.category !== undefined) myRest.category = patch.category;
-        if (patch.address !== undefined) myRest.address = patch.address;
-        if (patch.phone !== undefined) myRest.phone = patch.phone;
-        if (patch.description !== undefined)
-          myRest.description = patch.description;
-        if (patch.latitude !== undefined) myRest.latitude = patch.latitude;
-        if (patch.longitude !== undefined) myRest.longitude = patch.longitude;
-        if (patch.status !== undefined) myRest.status = patch.status;
-
-        // Actualizar features
-        if (patch.features) {
-          if (patch.features.wifi !== undefined)
-            myRest.wifi = patch.features.wifi;
-          if (patch.features.outdoorSeating !== undefined)
-            myRest.outdoorSeating = patch.features.outdoorSeating;
-          if (patch.features.parking !== undefined)
-            myRest.parking = patch.features.parking;
-          if (patch.features.reservations !== undefined)
-            myRest.reservations = patch.features.reservations;
-          if (patch.features.delivery !== undefined)
-            myRest.delivery = patch.features.delivery;
-          if (patch.features.cardPayment !== undefined)
-            myRest.cardPayment = patch.features.cardPayment;
-        }
-
-        // Actualizar imágenes
-        if (patch.images) {
-          myRest.images.splice(0, myRest.images.length);
-          patch.images.forEach((img) => myRest.images.push(img));
+      // Recorremos el objeto y borramos las claves que sean undefined
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === undefined) {
+          delete payload[key];
         }
       });
+
+      // setDoc con { merge: true } actualiza solo los campos que envíes
+      await setDoc(docRef, payload, { merge: true });
     },
-    [realm]
+    []
   );
 
   const addOwnerEvent = useCallback(
-    (event: Omit<RestaurantEvent, "id">) => {
-      realm.write(() => {
-        realm.create(EventModel, {
-          _id: new Realm.BSON.ObjectId(),
-          restaurantId: OWNER_ID,
-          title: event.title,
-          dateLabel: event.dateLabel,
-          description: event.description,
-          createdAt: new Date(),
-        });
+    async (event: Omit<RestaurantEvent, "id">) => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const docRef = doc(db, "restaurants", user.uid);
+
+      // Generamos un ID simple para el evento
+      const newEvent: RestaurantEvent = {
+        id: Date.now().toString(),
+        ...event,
+      };
+
+      // Usamos arrayUnion para agregar al arreglo "events" de Firestore
+      await updateDoc(docRef, {
+        events: arrayUnion(newEvent),
       });
     },
-    [realm]
+    []
   );
 
-  const removeOwnerEvent = useCallback(
-    (eventId: string) => {
-      realm.write(() => {
-        try {
-          const oid = new Realm.BSON.ObjectId(eventId);
-          const ev = realm.objectForPrimaryKey(EventModel, oid);
-          if (ev) realm.delete(ev);
-        } catch (e) {
-          console.log("Error eliminando evento:", e);
-        }
-      });
-    },
-    [realm]
-  );
+  const removeOwnerEvent = useCallback(async (eventId: string) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // Estrategia segura: Leer, filtrar y guardar.
+    const docRef = doc(db, "restaurants", user.uid);
+    const snap = await getDoc(docRef);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      const currentEvents = (data.events as RestaurantEvent[]) || [];
+      const updatedEvents = currentEvents.filter((e) => e.id !== eventId);
+
+      await updateDoc(docRef, { events: updatedEvents });
+    }
+  }, []);
+
+  // ✅ 5. FUNCIONES DE MENÚ (Implementadas)
+  const addDish = useCallback(async (dish: Dish) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const docRef = doc(db, "restaurants", user.uid);
+    await updateDoc(docRef, {
+      menu: arrayUnion(dish),
+    });
+  }, []);
+
+  const removeDish = useCallback(async (dishId: string) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const docRef = doc(db, "restaurants", user.uid);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const currentMenu = (snap.data().menu as Dish[]) || [];
+      const newMenu = currentMenu.filter((d) => d.id !== dishId);
+      await updateDoc(docRef, { menu: newMenu });
+    }
+  }, []);
 
   const value = useMemo(
     () => ({
-      restaurants: visibleRestaurants,
+      restaurants,
       favorites,
       toggleFavorite,
       upsertOwnerRestaurant,
       addOwnerEvent,
       removeOwnerEvent,
+      addDish, // ✅ Ahora sí están disponibles
+      removeDish, // ✅
     }),
     [
-      visibleRestaurants,
+      restaurants,
       favorites,
       toggleFavorite,
       upsertOwnerRestaurant,
       addOwnerEvent,
       removeOwnerEvent,
+      addDish,
+      removeDish,
     ]
   );
 

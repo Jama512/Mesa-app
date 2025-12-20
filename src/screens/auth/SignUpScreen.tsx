@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
-  Alert,
+  Alert, // ✅ Importar Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeContext";
@@ -32,14 +32,13 @@ const SignUpScreen: React.FC = () => {
   const { theme } = useTheme();
   const navigation = useNavigation<SignUpNav>();
 
-  // ✅ Usamos el hook de Auth (que ahora guarda en AsyncStorage)
-  const { loginAsOwner } = useAuth();
+  // ✅ Usamos registerOwner del nuevo AuthContext
+  const { registerOwner } = useAuth();
 
   const [ownerName, setOwnerName] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [errors, setErrors] = useState<SignUpErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -69,23 +68,29 @@ const SignUpScreen: React.FC = () => {
 
   const handleSignUp = async () => {
     if (!validate()) return;
-
     setIsSubmitting(true);
 
     try {
-      // ✅ Simulamos una pequeña espera para UX (opcional)
+      // Pequeña espera para UX
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // ✅ Login Persistente:
-      // Esto guarda la sesión en AsyncStorage y actualiza el estado global.
-      // Al actualizarse el estado, el StackNavigator cambiará automáticamente
-      // al stack de "Owner" (Dashboard), por lo que NO necesitamos navigation.navigate.
-      await loginAsOwner({ email, restaurantName });
+      // ✅ REGISTRO REAL (Crea usuario en DB Local)
+      const success = await registerOwner({
+        email,
+        password,
+        restaurantName,
+      });
 
-      // No es necesario setIsSubmitting(false) porque el componente se desmontará.
+      if (!success) {
+        // Si falló (ej. correo ya existe), detenemos el loading
+        setIsSubmitting(false);
+        // El alert de error ya lo muestra el AuthContext
+      }
+      // Si éxito, no hacemos nada más. El AuthContext cambia el estado 'isAuthenticated'
+      // a true, y el StackNavigator nos moverá al Dashboard automáticamente.
     } catch (error) {
       console.error(error);
-      Alert.alert("Error", "Ocurrió un problema al registrar la cuenta.");
+      Alert.alert("Error", "Ocurrió un problema al crear la cuenta.");
       setIsSubmitting(false);
     }
   };
