@@ -19,17 +19,13 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../config/firebaseConfig";
 
-// ✅ IMPORTAMOS LOS TIPOS CENTRALIZADOS
-// Ya no los definimos aquí abajo, usamos la "Fuente de la Verdad"
 import {
   Restaurant,
   Dish,
   RestaurantEvent,
 } from "../../types/restaurant.types";
 
-// ✅ RE-EXPORTAMOS (Truco Pro)
-// Esto sirve para que si otras pantallas importan "Dish" desde este Contexto,
-// sigan funcionando sin que tengas que ir a cambiarles la ruta de importación una por una.
+
 export type { Restaurant, Dish, RestaurantEvent };
 
 type Ctx = {
@@ -39,7 +35,6 @@ type Ctx = {
   upsertOwnerRestaurant: (patch: Partial<Restaurant>) => Promise<void>;
   addOwnerEvent: (event: Omit<RestaurantEvent, "id">) => void;
   removeOwnerEvent: (eventId: string) => void;
-  // Funciones Legacy (Se mantienen por compatibilidad con otras pantallas)
   addDish?: (dish: Dish) => Promise<void>;
   removeDish?: (dishId: string) => Promise<void>;
 };
@@ -66,7 +61,7 @@ export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
 
           return {
             id: docSnap.id,
-            // Aserciones de tipo para asegurar que coincidan con la interfaz
+        
             name: data.name || "Restaurante sin nombre",
             category: data.category || "General",
             latitude: data.latitude,
@@ -107,7 +102,7 @@ export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
-  // 3. ACCIONES DEL DUEÑO (Legacy / Global)
+  // 3. ACCIONES DEL DUEÑO
   const upsertOwnerRestaurant = useCallback(
     async (patch: Partial<Restaurant>) => {
       const user = auth.currentUser;
@@ -164,7 +159,7 @@ export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // 5. FUNCIONES DE MENÚ (Legacy - Mantenidas por compatibilidad)
+  // 5. FUNCIONES DE MENÚ 
   const addDish = useCallback(async (dish: Dish) => {
     const user = auth.currentUser;
     if (!user) return;
