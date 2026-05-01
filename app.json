@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "mesa-app",
+    "slug": "mesa-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/Logo_app_mesa.jpeg",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/Splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.miapp",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBBrhTJsQVc8j4UmlqQ6j5V7hGc5N1PA-Y"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c3dcd534-5fbe-4c39-9e2c-d22dd420f4ac"
+      }
+    }
+  }
+}
