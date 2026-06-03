@@ -17,9 +17,13 @@ import {
   arrayUnion,
   getDoc,
 } from "firebase/firestore";
-import { db, auth } from "../config/firebaseConfig";
 
-// Ya no los definimos aquí abajo, usamos la "Fuente de la Verdad"
+
+import * as FileSystem from "expo-file-system";
+
+import { db, auth } from "../config/firebaseConfig";
+import { getLocalRestaurants, saveRestaurantsLocally } from "../services/database.service";
+
 import {
   Restaurant,
   Dish,
@@ -35,12 +39,35 @@ type Ctx = {
   upsertOwnerRestaurant: (patch: Partial<Restaurant>) => Promise<void>;
   addOwnerEvent: (event: Omit<RestaurantEvent, "id">) => void;
   removeOwnerEvent: (eventId: string) => void;
-  // Funciones Legacy (Se mantienen por compatibilidad con otras pantallas)
   addDish?: (dish: Dish) => Promise<void>;
   removeDish?: (dishId: string) => Promise<void>;
 };
 
 const RestaurantsContext = createContext<Ctx | undefined>(undefined);
+
+// Helper para descargar y guardar imágenes localmente
+const cacheImageLocal = async (url: string, restaurantId: string, index: number): Promise<string> => {
+  if (!url || !url.startsWith("http")) return url; // Si ya es local o está vacía, se ignora
+
+  try {
+    const extension = url.split("?")[0].split(".").pop() || "jpg";
+    const filename = `rest_${restaurantId}_img_${index}.${extension}`;
+    const localFile = new FileSystem.File(FileSystem.Paths.document, filename);
+
+    // Verificar si la imagen ya fue descargada previamente
+    const fileInfo = await localFile.info();
+    if (fileInfo.exists) {
+      return localFile.uri;
+    }
+
+    // Si no existe, descargarla
+    await FileSystem.File.downloadFileAsync(url, localFile);
+    return localFile.uri;
+  } catch (error) {
+    console.log("Error descargando imagen para caché:", error);
+    return url; // Si falla por falta de red, devolvemos la original como plan B
+  }
+};
 
 export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -48,21 +75,38 @@ export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
 
-  // 1. LEER DE FIREBASE (Tiempo Real 📡)
+  // 1. CARGA OFFLINE Y SINCRONIZACIÓN CON FIREBASE
   useEffect(() => {
+    let isMounted = true;
+
+    // A) Fast-Boot: Cargar datos desde SQLite al instante
+    const loadOfflineData = async () => {
+      try {
+        const localData = await getLocalRestaurants();
+        if (localData && localData.length > 0 && isMounted) {
+          setRestaurants(localData);
+          console.log("⚡ Restaurantes cargados desde SQLite (Offline-First)");
+        }
+      } catch (e) {
+        console.log("No se pudo leer SQLite", e);
+      }
+    };
+
+    loadOfflineData();
+
+    // B) Sincronización en segundo plano con Firebase
     const unsubscribe = onSnapshot(
       collection(db, "restaurants"),
-      (snapshot) => {
-        const list: Restaurant[] = snapshot.docs.map((docSnap) => {
+      async (snapshot) => {
+        const currentUser = auth.currentUser;
+        
+        // Mapeo inicial de los datos en crudo
+        const rawList: Restaurant[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
-          const currentUser = auth.currentUser;
-
-          // Verificar si es mío comparando IDs
           const isOwner = currentUser && data.ownerId === currentUser.uid;
 
           return {
             id: docSnap.id,
-            // Aserciones de tipo para asegurar que coincidan con la interfaz
             name: data.name || "Restaurante sin nombre",
             category: data.category || "General",
             latitude: data.latitude,
@@ -80,16 +124,40 @@ export const RestaurantsProvider: React.FC<{ children: React.ReactNode }> = ({
             ownerId: data.ownerId,
           } as Restaurant;
         });
-        setRestaurants(list);
+
+        // Procesamiento asíncrono para descargar las imágenes localmente
+        const processedList = await Promise.all(
+          rawList.map(async (rest) => {
+            if (rest.images && rest.images.length > 0) {
+              const localImages = await Promise.all(
+                rest.images.map((imgUrl, index) => cacheImageLocal(imgUrl, rest.id, index))
+              );
+              return { ...rest, images: localImages };
+            }
+            return rest;
+          })
+        );
+
+        if (isMounted) {
+          setRestaurants(processedList);
+          // Actualizamos la mochila (SQLite) con los textos y las NUEVAS rutas locales de las imágenes
+          saveRestaurantsLocally(processedList);
+        }
+      },
+      (error) => {
+        console.log("Modo Offline activo o error en onSnapshot:", error);
       }
     );
 
-    // Cargar favoritos locales
+    // Cargar favoritos locales (AsyncStorage)
     AsyncStorage.getItem("MESA_FAVORITES").then((res) => {
-      if (res) setFavorites(JSON.parse(res));
+      if (res && isMounted) setFavorites(JSON.parse(res));
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   // 2. FAVORITOS (Local)

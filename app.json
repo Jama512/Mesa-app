@@ -23,7 +23,10 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.miapp",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyBBrhTJsQVc8j4UmlqQ6j5V7hGc5N1PA-Y"
@@ -37,6 +40,9 @@
       "eas": {
         "projectId": "c3dcd534-5fbe-4c39-9e2c-d22dd420f4ac"
       }
-    }
+    },
+    "plugins": [
+      "expo-sqlite"
+    ]
   }
 }

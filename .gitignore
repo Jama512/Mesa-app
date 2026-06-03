@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Almacenar claves de servicio fuera del repositorio
+/backend/serviceAccountKey.json

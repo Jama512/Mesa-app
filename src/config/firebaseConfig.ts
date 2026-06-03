@@ -1,11 +1,10 @@
 // src/config/firebaseConfig.ts
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-// @ts-ignore (Ignoramos el warning de TS, funciona bien en React Native)
+// @ts-ignore 
 import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-// Importamos App Check
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 // --- CONFIGURACIÓN DE CREDENCIALES ---
@@ -32,14 +31,18 @@ export const db = getFirestore(app);
 // 4. ALMACENAMIENTO (FIREBASE STORAGE)
 export const storage = getStorage(app);
 
-// 5. APP CHECK 
+// 5. CONFIGURACIÓN DE APP CHECK (
+if (__DEV__) {
+  // @ts-ignore - Evita que el SDK busque el objeto 'document' en Android
+  global.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+}
+
 try {
   initializeAppCheck(app, {
-    // Clave genérica para entorno de desarrollo escolar
-    provider: new ReCaptchaV3Provider('CLAVE_PUBLICA_DE_DESARROLLO'),
+    provider: new ReCaptchaV3Provider('6LdyC8sqAAAAAHSq2fLzY9l6_r699Pshq9v6l8_H'),
     isTokenAutoRefreshEnabled: true
   });
-  console.log("Firebase App Check inicializado correctamente.");
+  console.log("Firebase App Check inicializado correctamente con Debug Token.");
 } catch (error) {
   console.warn("Nota: App Check funciona mejor en builds compiladas (APK).", error);
 }
